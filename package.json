@@ -6,7 +6,7 @@
     "dev": "concurrently \"npm run start:web\" \"npm run sync\"",
     "start:web": "next dev",
     "build": "next build",
-    "start": "concurrently \"next start\" \"npm run sync\"",
+    "start": "next start",
     "lint": "eslint",
     "sync": "node cron.js"
   },
