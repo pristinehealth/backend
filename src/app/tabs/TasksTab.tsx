@@ -23,16 +23,43 @@ export function TasksTab() {
     }, [staffInput]);
 
     // Date filter
-    const [dateFilter, setDateFilter] = useState(""); // "" = all, "YYYY-MM-DD" = specific day
+    const [activeChip, setActiveChip] = useState<'today' | 'week' | ''>("");
+    const [customDate, setCustomDate] = useState(""); // single day from the date picker
+
     const todayStr = new Date().toISOString().split('T')[0];
     const thisWeekStart = (() => {
-        const d = new Date(); d.setDate(d.getDate() - d.getDay()); return d.toISOString().split('T')[0];
+        const d = new Date();
+        // Monday-anchored week (0=Sun → shift to Mon)
+        const day = d.getDay();
+        const diff = day === 0 ? -6 : 1 - day;
+        d.setDate(d.getDate() + diff);
+        return d.toISOString().split('T')[0];
+    })();
+    const thisWeekEnd = (() => {
+        const d = new Date();
+        const day = d.getDay();
+        const diff = day === 0 ? 0 : 7 - day;
+        d.setDate(d.getDate() + diff);
+        return d.toISOString().split('T')[0];
     })();
 
-    const handleDateChip = (val: string) => {
-        setDateFilter(prev => prev === val ? "" : val);
+    const handleChip = (chip: 'today' | 'week') => {
+        setActiveChip(prev => prev === chip ? '' : chip);
+        setCustomDate('');
         setPage(1);
     };
+
+    // Build query args based on active filter
+    const dateQueryArgs = (() => {
+        if (activeChip === 'today') return { dateFrom: todayStr, dateTo: todayStr };
+        if (activeChip === 'week') return { dateFrom: thisWeekStart, dateTo: thisWeekEnd };
+        if (customDate) return { date: customDate };
+        return {};
+    })();
+
+    const { data: rawData, isLoading, error: rtkError, isFetching } = useGetTasksQuery(
+        { page, limit, ...(staffSearch ? { staff: staffSearch } : {}), ...dateQueryArgs }
+    );
 
     // PDF states
     const [isGeneratingPdf, setIsGeneratingPdf] = useState<Record<string, boolean>>({});
@@ -56,10 +83,6 @@ export function TasksTab() {
             setIsGeneratingPdf(prev => ({ ...prev, [reportId]: false }));
         }
     };
-
-    const { data: rawData, isLoading, error: rtkError, isFetching } = useGetTasksQuery(
-        { page, limit, ...(staffSearch ? { staff: staffSearch } : {}), ...(dateFilter ? { date: dateFilter } : {}) }
-    );
 
     const taskList: any[] = Array.isArray(rawData) ? rawData : (rawData?.data ?? []);
     const pagination = rawData?.pagination ?? null;
@@ -122,16 +145,16 @@ export function TasksTab() {
                 {/* Date quick-chips */}
                 <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Date:</span>
-                    {[
-                        { label: "Today", val: todayStr },
-                        { label: "This Week", val: thisWeekStart },
-                    ].map(({ label, val }) => (
+                    {([
+                        { label: "Today", chip: 'today' as const },
+                        { label: "This Week", chip: 'week' as const },
+                    ]).map(({ label, chip }) => (
                         <button
-                            key={val}
-                            onClick={() => handleDateChip(val)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${dateFilter === val
-                                    ? "bg-brand-orange text-white border-brand-orange"
-                                    : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-brand-orange hover:text-brand-orange"
+                            key={chip}
+                            onClick={() => handleChip(chip)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${activeChip === chip
+                                ? "bg-brand-orange text-white border-brand-orange"
+                                : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-brand-orange hover:text-brand-orange"
                                 }`}
                         >
                             {label}
@@ -140,13 +163,13 @@ export function TasksTab() {
                     {/* Custom date picker */}
                     <input
                         type="date"
-                        value={dateFilter && dateFilter !== thisWeekStart ? dateFilter : ""}
-                        onChange={e => { setDateFilter(e.target.value); setPage(1); }}
+                        value={customDate}
+                        onChange={e => { setCustomDate(e.target.value); setActiveChip(''); setPage(1); }}
                         className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-orange"
                     />
-                    {dateFilter && (
+                    {(activeChip || customDate) && (
                         <button
-                            onClick={() => { setDateFilter(""); setPage(1); }}
+                            onClick={() => { setActiveChip(''); setCustomDate(''); setPage(1); }}
                             className="flex items-center gap-1 px-2 py-1.5 rounded-xl text-xs font-bold text-slate-400 hover:text-red-500 border border-slate-200 dark:border-slate-700 hover:border-red-300 transition-all"
                             title="Clear date filter"
                         >

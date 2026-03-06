@@ -31,7 +31,7 @@ export const perfexApi = createApi({
             query: () => "contacts",
             providesTags: ["Contacts"],
         }),
-        getTasks: builder.query<any, { page?: number; limit?: number; staff?: string; date?: string } | void>({
+        getTasks: builder.query<any, { page?: number; limit?: number; staff?: string; date?: string; dateFrom?: string; dateTo?: string } | void>({
             query: (arg) => {
                 if (!arg) return "tasks";
                 const params = new URLSearchParams();
@@ -39,6 +39,8 @@ export const perfexApi = createApi({
                 if (arg.limit) params.set('limit', String(arg.limit));
                 if (arg.staff) params.set('staff', arg.staff);
                 if (arg.date) params.set('date', arg.date);
+                if (arg.dateFrom) params.set('dateFrom', arg.dateFrom);
+                if (arg.dateTo) params.set('dateTo', arg.dateTo);
                 return `tasks?${params.toString()}`;
             },
             providesTags: ["Tasks"],

@@ -29,26 +29,7 @@ export async function GET(req: Request) {
             return NextResponse.json({ error: 'Unauthorized: Token payload missing userid' }, { status: 401 });
         }
 
-        // 3. Check if mobile user requested a hard refresh of Perfex upstream
         const url = new URL(req.url);
-        if (url.searchParams.get('refresh') === 'true') {
-            try {
-                // Command a scoped sync to explicitly fetch only what the mobile dashboard 
-                // cares about (Tasks and Timesheets) utilizing the optimized start/length loops.
-                await fetch(`${process.env.PUBLIC_BASE_URL}/api/sync/scoped`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${process.env.CRON_SECRET || 'pristine-cron-secret'}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ resources: ['tasks', 'timesheets', 'projects'] })
-                });
-                console.log(`[Mobile API] Scoped Refresh (tasks, timesheets, projects) commanded by Staff ID ${staffid}`);
-            } catch (syncErr) {
-                console.error("[Mobile API] Failed to orchestrate implicit scoped sync", syncErr);
-            }
-        }
-
         const startParam = parseInt(url.searchParams.get('start') || '0', 10);
         const lengthParam = parseInt(url.searchParams.get('length') || '25', 10);
 

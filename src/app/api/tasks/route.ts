@@ -15,8 +15,11 @@ export async function GET(request: Request) {
         const page = parseInt(searchParams.get('page') || '1', 10);
         const limit = parseInt(searchParams.get('limit') || '50', 10);
         const staffSearch = (searchParams.get('staff') || '').trim();
-        // date = ISO date string e.g. "2026-03-05" — filters by task startdate prefix
+        // Single date prefix match (e.g. "2026-03-06" from custom picker)
         const dateFilter = (searchParams.get('date') || '').trim();
+        // Date range (from day chips: Today / This Week)
+        const dateFrom = (searchParams.get('dateFrom') || '').trim();
+        const dateTo = (searchParams.get('dateTo') || '').trim();
         const skip = (page - 1) * limit;
 
         // --- Server-side staff filter ---
@@ -81,13 +84,22 @@ export async function GET(request: Request) {
         }
 
         if (dateFilter) {
-            // startdate is stored as "YYYY-MM-DD HH:MM:SS" — prefix-match the date part
+            // Single date from custom picker: prefix match "YYYY-MM-DD"
             conditions.push({
                 $or: [
                     { startdate: { $regex: `^${dateFilter}` } },
                     { dateadded: { $regex: `^${dateFilter}` } },
                 ]
             });
+        } else if (dateFrom) {
+            // Range query from Today / This Week chips
+            // startdate stored as "YYYY-MM-DD HH:MM:SS" — string comparison works for ISO dates
+            const dateToExclusive = dateTo
+                ? (() => { const d = new Date(dateTo); d.setDate(d.getDate() + 1); return d.toISOString().split('T')[0]; })()
+                : undefined;
+            const rangeCondition: any = { startdate: { $gte: dateFrom } };
+            if (dateToExclusive) rangeCondition.startdate.$lt = dateToExclusive;
+            conditions.push(rangeCondition);
         }
 
         const query: any = conditions.length === 1 ? conditions[0]

@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from "next-auth/react";
 import { useState, useEffect } from "react";
-import { LogOut, Users, UsersRound, Building2, ClipboardList, RefreshCw, Menu, X, Play, Square } from "lucide-react";
+import { LogOut, Users, UsersRound, Building2, ClipboardList, RefreshCw, Menu, X, Play, Square, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { StaffTab } from "./tabs/StaffTab";
@@ -19,22 +19,79 @@ export default function Dashboard() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const [cronStatus, setCronStatus] = useState<{ isActive: boolean } | null>(null);
+  const [cronStatus, setCronStatus] = useState<{ isActive: boolean; currentMode?: string; scheduledHour?: number; intervalMinutes?: number } | null>(null);
   const [isTogglingCron, setIsTogglingCron] = useState(false);
+  const [syncMode, setSyncMode] = useState<'daily' | 'interval'>('daily');
+  const [syncHour, setSyncHour] = useState<number>(2);
+  // intervalInput is the raw string the user types (avoids parseInt||1 killing backspace)
+  const [intervalInput, setIntervalInput] = useState<string>('60');
+  const [intervalUnit, setIntervalUnit] = useState<'mins' | 'hrs'>('mins');
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
 
   // Fetch initial cron status on mount
   useEffect(() => {
     fetch('/api/cron')
       .then(res => res.json())
-      .then(data => setCronStatus(data))
+      .then(data => {
+        setCronStatus(data);
+        if (data.currentMode) setSyncMode(data.currentMode);
+        if (data.scheduledHour !== undefined) setSyncHour(data.scheduledHour);
+        if (data.intervalMinutes !== undefined) {
+          // Convert stored minutes to the display unit value
+          const isHrs = data.intervalMinutes % 60 === 0 && data.intervalMinutes >= 60;
+          const unit = isHrs ? 'hrs' : 'mins';
+          const displayVal = isHrs ? data.intervalMinutes / 60 : data.intervalMinutes;
+          setIntervalUnit(unit);
+          setIntervalInput(String(displayVal));
+        }
+      })
       .catch(err => console.error("Failed to fetch cron status:", err));
   }, []);
+
+  // Helper: compute final minutes from the string input + unit
+  const computeIntervalMinutes = () => {
+    const val = Math.max(1, parseInt(intervalInput, 10) || 1);
+    return intervalUnit === 'hrs' ? val * 60 : val;
+  };
+
+  // Switch unit while preserving the effective duration
+  const handleUnitSwitch = (newUnit: 'mins' | 'hrs') => {
+    if (newUnit === intervalUnit) return;
+    const currentMins = computeIntervalMinutes();
+    if (newUnit === 'hrs') {
+      setIntervalInput(String(Math.round(currentMins / 60) || 1));
+    } else {
+      setIntervalInput(String(currentMins));
+    }
+    setIntervalUnit(newUnit);
+  };
+
+  // Shared save-schedule logic used by both "Save Schedule" button and Start Auto-Sync
+  const saveSchedule = async () => {
+    const intervalMinutes = computeIntervalMinutes();
+    const body: any = { action: 'reschedule', mode: syncMode };
+    if (syncMode === 'daily') body.hour = syncHour;
+    else body.intervalMinutes = intervalMinutes;
+    const res = await fetch('/api/cron', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save schedule.');
+    setCronStatus(prev => prev ? { ...prev, currentMode: syncMode, scheduledHour: syncHour, intervalMinutes } : prev);
+    return data;
+  };
 
   const handleToggleCron = async () => {
     if (!cronStatus) return;
     setIsTogglingCron(true);
-    const action = cronStatus.isActive ? 'stop' : 'start';
     try {
+      if (!cronStatus.isActive) {
+        // Save current schedule to DB first so the cron arms with what the UI shows
+        await saveSchedule();
+      }
+      const action = cronStatus.isActive ? 'stop' : 'start';
       const res = await fetch('/api/cron', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -42,13 +99,13 @@ export default function Dashboard() {
       });
       const data = await res.json();
       if (res.ok) {
-        setCronStatus({ isActive: data.isActive });
+        setCronStatus(prev => prev ? { ...prev, isActive: data.isActive } : { isActive: data.isActive });
       } else {
         alert(data.error || 'Failed to toggle cron status.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Error communicating with cron API.');
+      alert(err.message || 'Error communicating with cron API.');
     } finally {
       setIsTogglingCron(false);
     }
@@ -148,6 +205,106 @@ export default function Dashboard() {
           {cronStatus?.isActive ? <Square className="h-5 w-5" /> : <Play className="h-5 w-5" />}
           {cronStatus?.isActive ? 'Stop Auto-Sync' : 'Start Auto-Sync'}
         </button>
+
+        {/* Sync Schedule Widget */}
+        <div className="mt-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+          <div className="flex items-center gap-2 mb-2">
+            <Clock className="h-4 w-4 text-slate-400" />
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Sync Schedule</span>
+          </div>
+
+          {/* Mode Toggle */}
+          <div className="flex rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 mb-2 text-xs font-semibold">
+            {(['daily', 'interval'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => setSyncMode(m)}
+                className={cn(
+                  "flex-1 py-1 capitalize transition-colors",
+                  syncMode === m
+                    ? "bg-brand-blue text-white"
+                    : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                )}
+              >{m}</button>
+            ))}
+          </div>
+
+          {syncMode === 'daily' ? (
+            <select
+              value={syncHour}
+              onChange={e => setSyncHour(parseInt(e.target.value, 10))}
+              className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-blue mb-2"
+            >
+              {Array.from({ length: 24 }, (_, h) => (
+                <option key={h} value={h}>
+                  {String(h).padStart(2, '0')}:00 — {h === 0 ? 'Midnight' : h < 12 ? `${h} AM` : h === 12 ? 'Noon' : `${h - 12} PM`}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="mb-2">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={intervalInput}
+                  onChange={e => {
+                    // Allow free typing — don't force minimum until save
+                    const v = e.target.value.replace(/[^0-9]/g, '');
+                    setIntervalInput(v);
+                  }}
+                  onBlur={() => {
+                    // Clamp to minimum of 1 on blur
+                    const v = Math.max(1, parseInt(intervalInput, 10) || 1);
+                    setIntervalInput(String(v));
+                  }}
+                  className="w-20 text-sm border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-blue"
+                />
+                {/* Unit toggle: mins / hrs */}
+                <div className="flex rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 text-xs font-semibold">
+                  {(['mins', 'hrs'] as const).map(u => (
+                    <button
+                      key={u}
+                      onClick={() => handleUnitSwitch(u)}
+                      className={cn(
+                        "px-2 py-1 transition-colors",
+                        intervalUnit === u
+                          ? "bg-brand-blue text-white"
+                          : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      )}
+                    >{u}</button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Fires every {intervalInput || '?'} {intervalUnit}
+                {intervalUnit === 'hrs'
+                  ? ` (${(parseInt(intervalInput, 10) || 0) * 60} mins)`
+                  : (parseInt(intervalInput, 10) || 0) >= 60
+                    ? ` (${((parseInt(intervalInput, 10) || 0) / 60).toFixed(1)}h)`
+                    : ''}
+              </p>
+            </div>
+          )}
+
+          <button
+            onClick={async () => {
+              setIsSavingSchedule(true);
+              try {
+                await saveSchedule();
+              } catch (err: any) {
+                alert(err.message || 'Failed to reschedule.');
+              } finally {
+                setIsSavingSchedule(false);
+              }
+            }}
+            disabled={isSavingSchedule}
+            className="w-full py-1.5 rounded-md text-xs font-bold bg-brand-blue text-white hover:bg-brand-blue/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isSavingSchedule ? 'Saving...' : 'Save Schedule'}
+          </button>
+        </div>
+
 
         <button
           onClick={handleGlobalSync}

@@ -6,29 +6,125 @@ import Project from '@/models/Project';
 import Task from '@/models/Task';
 import Timesheet from '@/models/Timesheet';
 
-async function fetchFromPerfex(endpoint: string, adminToken: string) {
-    const response = await fetch(`${endpoint}`, {
-        method: 'GET',
-        headers: {
-            'authtoken': adminToken,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-        },
-    });
+const PAGE_SIZE = 50;
 
-    if (!response.ok) {
-        throw new Error(`Failed to fetch ${endpoint}: ${response.status} ${response.statusText}`);
+interface ResourceConfig {
+    model: any;
+    endpoint: string;
+    idKey: string;
+    /** If true, skip overwriting customfields when Perfex returns an empty array */
+    preserveCustomfields?: boolean;
+}
+
+const RESOURCE_MAP: Record<string, ResourceConfig> = {
+    staffs: { model: Staff, endpoint: 'staffs', idKey: 'staffid' },
+    customers: { model: Customer, endpoint: 'customers', idKey: 'userid' },
+    projects: { model: Project, endpoint: 'projects', idKey: 'id', preserveCustomfields: true },
+    tasks: { model: Task, endpoint: 'tasks', idKey: 'id' },
+    timesheets: { model: Timesheet, endpoint: 'timesheets', idKey: 'id' },
+};
+
+/**
+ * Paginated sync of a single resource from Perfex → MongoDB.
+ * - Fetches all pages (start/length loop) before touching the DB.
+ * - Orphan deleteMany only runs if ALL pages were fetched successfully.
+ * - Returns a result summary for logging.
+ */
+async function syncResource(
+    config: ResourceConfig,
+    perfexEndpoint: string,
+    adminToken: string
+): Promise<Record<string, any>> {
+    let start = 0;
+    let hasMore = true;
+    const activeIds: any[] = [];
+    const allBulkOps: any[] = [];
+    let fetchError = false;
+
+    // ── Phase 1: fetch all pages ───────────────────────────────────────────
+    while (hasMore) {
+        const url = `${perfexEndpoint}/${config.endpoint}?start=${start}&length=${PAGE_SIZE}`;
+        console.log(`[Sync/All] Fetching ${config.endpoint} (start=${start}, length=${PAGE_SIZE})`);
+
+        try {
+            const res = await fetch(url, {
+                headers: { 'authtoken': adminToken, 'Accept': 'application/json' }
+            });
+
+            if (!res.ok) {
+                console.error(`[Sync/All] ${config.endpoint} page start=${start} returned ${res.status}`);
+                fetchError = true;
+                break; // stop paginating — do NOT run orphan delete
+            }
+
+            const raw = await res.json();
+            const chunk: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+
+            if (chunk.length === 0) { hasMore = false; break; }
+
+            for (const item of chunk) {
+                const idValue = item[config.idKey];
+                activeIds.push(idValue);
+
+                const payload = { ...item };
+                // Don't overwrite customfields with an empty array — preserve locally enriched data
+                if (config.preserveCustomfields && (!item.customfields || item.customfields.length === 0)) {
+                    delete payload.customfields;
+                }
+
+                allBulkOps.push({
+                    updateOne: {
+                        filter: { [config.idKey]: idValue },
+                        update: { $set: payload },
+                        upsert: true
+                    }
+                });
+            }
+
+            hasMore = chunk.length === PAGE_SIZE;
+            start += PAGE_SIZE;
+
+        } catch (err: any) {
+            console.error(`[Sync/All] Network error on ${config.endpoint} start=${start}:`, err.message);
+            fetchError = true;
+            break;
+        }
     }
 
-    const data = await response.json();
-    return Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : []);
+    if (allBulkOps.length === 0) {
+        return { synced: false, message: fetchError ? 'Fetch failed' : 'No data from Perfex' };
+    }
+
+    // ── Phase 2: bulk upsert ───────────────────────────────────────────────
+    const writeResult = await config.model.bulkWrite(allBulkOps);
+
+    // ── Phase 3: orphan pruning — ONLY if fetch completed without errors ──
+    // If any page failed we have an incomplete activeIds list; deleting
+    // based on it would incorrectly remove records that still exist in Perfex.
+    let deletedCount = 0;
+    if (!fetchError && activeIds.length > 0) {
+        const del = await config.model.deleteMany({ [config.idKey]: { $nin: activeIds } });
+        deletedCount = del.deletedCount;
+        if (deletedCount > 0) {
+            console.log(`[Sync/All] Pruned ${deletedCount} orphaned ${config.endpoint} from local DB.`);
+        }
+    } else if (fetchError) {
+        console.warn(`[Sync/All] Skipping orphan pruning for ${config.endpoint} — fetch was incomplete.`);
+    }
+
+    return {
+        synced: true,
+        totalActive: activeIds.length,
+        matched: writeResult.matchedCount,
+        upserted: writeResult.upsertedCount,
+        modified: writeResult.modifiedCount,
+        deleted: deletedCount,
+        partialFetch: fetchError,
+    };
 }
 
 export async function POST(request: Request) {
     try {
-        const url = new URL(request.url);
-        const forceSync = url.searchParams.get('force') === 'true';
-
         const perfexEndpoint = process.env.PERFEX_ENDPOINT;
         const adminToken = process.env.PERFEX_ADMIN_TOKEN;
 
@@ -41,157 +137,16 @@ export async function POST(request: Request) {
 
         await dbConnect();
 
-        const syncResults: any = {};
+        const syncResults: Record<string, any> = {};
 
-        // 1. Sync Staff
-        try {
-            const perfexStaff = await fetchFromPerfex(`${perfexEndpoint}/staffs`, adminToken);
-
-            const bulkOps = perfexStaff.map((item: any) => ({
-                updateOne: { filter: { staffid: item.staffid }, update: { $set: item }, upsert: true }
-            }));
-
-            // Identify active IDs from Perfex to delete local orphans
-            const activeIds = perfexStaff.map((item: any) => item.staffid);
-
-            if (bulkOps.length > 0) {
-                const result = await Staff.bulkWrite(bulkOps);
-                const deleteResult = await Staff.deleteMany({ staffid: { $nin: activeIds } });
-
-                syncResults.staff = {
-                    synced: true,
-                    matched: result.matchedCount,
-                    upserted: result.upsertedCount,
-                    modified: result.modifiedCount,
-                    deleted: deleteResult.deletedCount
-                };
-            } else {
-                syncResults.staff = { synced: false, message: 'No data from Perfex' };
+        // Run sequentially so we don't hammer Perfex with parallel requests
+        for (const [name, config] of Object.entries(RESOURCE_MAP)) {
+            try {
+                syncResults[name] = await syncResource(config, perfexEndpoint, adminToken);
+            } catch (err: any) {
+                console.error(`[Sync/All] Fatal error syncing ${name}:`, err.message);
+                syncResults[name] = { error: err.message };
             }
-        } catch (e: any) {
-            syncResults.staff = { error: e.message };
-        }
-
-        // 2. Sync Customers
-        try {
-            const perfexCustomers = await fetchFromPerfex(`${perfexEndpoint}/customers`, adminToken);
-
-            const bulkOps = perfexCustomers.map((item: any) => ({
-                updateOne: { filter: { userid: item.userid }, update: { $set: item }, upsert: true }
-            }));
-
-            // Identify active IDs from Perfex to delete local orphans
-            const activeIds = perfexCustomers.map((item: any) => item.userid);
-
-            if (bulkOps.length > 0) {
-                const result = await Customer.bulkWrite(bulkOps);
-                const deleteResult = await Customer.deleteMany({ userid: { $nin: activeIds } });
-
-                syncResults.customers = {
-                    synced: true,
-                    matched: result.matchedCount,
-                    upserted: result.upsertedCount,
-                    modified: result.modifiedCount,
-                    deleted: deleteResult.deletedCount
-                };
-            } else {
-                syncResults.customers = { synced: false, message: 'No data from Perfex' };
-            }
-        } catch (e: any) {
-            syncResults.customers = { error: e.message };
-        }
-
-        // 3. Sync Projects
-        try {
-            const perfexProjects = await fetchFromPerfex(`${perfexEndpoint}/projects`, adminToken);
-
-            const bulkOps = perfexProjects.map((item: any) => {
-                const updatePayload = { ...item };
-                if (!item.customfields || item.customfields.length === 0) {
-                    delete updatePayload.customfields;
-                }
-                return {
-                    updateOne: { filter: { id: item.id }, update: { $set: updatePayload }, upsert: true }
-                };
-            });
-
-            // Identify active IDs from Perfex to delete local orphans
-            const activeIds = perfexProjects.map((item: any) => item.id);
-
-            if (bulkOps.length > 0) {
-                const result = await Project.bulkWrite(bulkOps);
-                const deleteResult = await Project.deleteMany({ id: { $nin: activeIds } });
-
-                syncResults.projects = {
-                    synced: true,
-                    matched: result.matchedCount,
-                    upserted: result.upsertedCount,
-                    modified: result.modifiedCount,
-                    deleted: deleteResult.deletedCount
-                };
-            } else {
-                syncResults.projects = { synced: false, message: 'No data from Perfex' };
-            }
-        } catch (e: any) {
-            syncResults.projects = { error: e.message };
-        }
-
-        // 4. Sync Tasks
-        try {
-            const perfexTasks = await fetchFromPerfex(`${perfexEndpoint}/tasks`, adminToken);
-
-            const bulkOps = perfexTasks.map((item: any) => ({
-                updateOne: { filter: { id: item.id }, update: { $set: item }, upsert: true }
-            }));
-
-            // Identify active IDs from Perfex to delete local orphans
-            const activeIds = perfexTasks.map((item: any) => item.id);
-
-            if (bulkOps.length > 0) {
-                const result = await Task.bulkWrite(bulkOps);
-                const deleteResult = await Task.deleteMany({ id: { $nin: activeIds } });
-
-                syncResults.tasks = {
-                    synced: true,
-                    matched: result.matchedCount,
-                    upserted: result.upsertedCount,
-                    modified: result.modifiedCount,
-                    deleted: deleteResult.deletedCount
-                };
-            } else {
-                syncResults.tasks = { synced: false, message: 'No data from Perfex' };
-            }
-        } catch (e: any) {
-            syncResults.tasks = { error: e.message };
-        }
-
-        // 5. Sync Timesheets
-        try {
-            const perfexTimesheets = await fetchFromPerfex(`${perfexEndpoint}/timesheets`, adminToken);
-
-            const bulkOps = perfexTimesheets.map((item: any) => ({
-                updateOne: { filter: { id: item.id }, update: { $set: item }, upsert: true }
-            }));
-
-            // Identify active IDs from Perfex to delete local orphans
-            const activeIds = perfexTimesheets.map((item: any) => item.id);
-
-            if (bulkOps.length > 0) {
-                const result = await Timesheet.bulkWrite(bulkOps);
-                const deleteResult = await Timesheet.deleteMany({ id: { $nin: activeIds } });
-
-                syncResults.timesheets = {
-                    synced: true,
-                    matched: result.matchedCount,
-                    upserted: result.upsertedCount,
-                    modified: result.modifiedCount,
-                    deleted: deleteResult.deletedCount
-                };
-            } else {
-                syncResults.timesheets = { synced: false, message: 'No data from Perfex' };
-            }
-        } catch (e: any) {
-            syncResults.timesheets = { error: e.message };
         }
 
         return NextResponse.json({
@@ -201,7 +156,7 @@ export async function POST(request: Request) {
         });
 
     } catch (error: any) {
-        console.error('Error during global sync:', error);
+        console.error('[Sync/All] Fatal error:', error);
         return NextResponse.json(
             { error: 'Internal Server Error', details: error.message },
             { status: 500 }
