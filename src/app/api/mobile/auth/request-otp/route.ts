@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import dbConnect from '@/lib/mongoose';
 import Staff from '@/models/Staff';
-import nodemailer from 'nodemailer';
 
 export async function POST(req: Request) {
     try {
@@ -57,48 +56,64 @@ export async function POST(req: Request) {
 }
 
 async function sendOtpEmail(to: string, code: string, name: string) {
-    // Note: In a real production environment, these should come from process.env
-    // For now, we will log the intended email to the server console if credentials are not present.
+    const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+            <h2 style="color: #4F46E5;">Pristine Login Verification</h2>
+            <p>Hello ${name},</p>
+            <p>Your one-time password (OTP) to log into the Pristine Staffing app is:</p>
+            <div style="background-color: #F3F4F6; padding: 15px; font-size: 24px; font-weight: bold; text-align: center; letter-spacing: 5px; border-radius: 5px; margin: 20px 0;">
+                ${code}
+            </div>
+            <p style="color: #666; font-size: 12px;">This code expires in 10 minutes. If you did not request this, please ignore this email.</p>
+        </div>
+    `;
+
+    // ── Provider: Resend (set RESEND_API_KEY to activate — works locally or in prod) ──
+    if (process.env.RESEND_API_KEY) {
+        console.log('[OTP] Sending via Resend...');
+        const { Resend } = await import('resend');
+        const resend = new Resend(process.env.RESEND_API_KEY);
+        const from = process.env.EMAIL_FROM || 'Pristine Staffing <onboarding@resend.dev>';
+        const { error } = await resend.emails.send({
+            from,
+            to,
+            subject: 'Your Pristine Login Code',
+            html,
+        });
+        if (error) throw new Error(`Resend error: ${error.message}`);
+        console.log('[OTP] Sent via Resend ✓');
+        return;
+    }
+
+    // ── Provider: Gmail SMTP via nodemailer (local dev fallback) ──
     const user = process.env.SMTP_USER;
     const pass = process.env.SMTP_PASS;
     const host = process.env.SMTP_HOST;
     const port = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 587;
 
     if (!user || !pass || !host) {
+        // No credentials at all — log OTP to console for development
         console.log(`\n========================================`);
-        console.log(`[DEVELOPMENT MODE] OTP GENERATED FOR ${to}`);
+        console.log(`[DEVELOPMENT MODE] OTP FOR ${to}`);
         console.log(`CODE: ${code}`);
         console.log(`========================================\n`);
         return;
     }
 
+    console.log('[OTP] Sending via Gmail SMTP...');
+    const nodemailer = (await import('nodemailer')).default;
     const transporter = nodemailer.createTransport({
         host,
         port,
-        secure: port === 465, // true for 465, false for other ports
-        auth: {
-            user,
-            pass,
-        },
+        secure: port === 465,
+        auth: { user, pass },
     });
 
     const info = await transporter.sendMail({
         from: `"Pristine Staffing" <${user}>`,
         to,
         subject: 'Your Pristine Login Code',
-        text: `Hello ${name}, your login code is: ${code}. It expires in 10 minutes.`,
-        html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-                <h2 style="color: #4F46E5;">Pristine Login Verification</h2>
-                <p>Hello ${name},</p>
-                <p>Your one-time password (OTP) to log into the Pristine Staffing app is:</p>
-                <div style="background-color: #F3F4F6; padding: 15px; font-size: 24px; font-weight: bold; text-align: center; letter-spacing: 5px; border-radius: 5px; margin: 20px 0;">
-                    ${code}
-                </div>
-                <p style="color: #666; font-size: 12px;">This code will expire in 10 minutes. If you did not request this code, please ignore this email.</p>
-            </div>
-        `,
+        html,
     });
-
-    console.log("Message sent: %s", info.messageId);
+    console.log('[OTP] Sent via Gmail SMTP ✓ messageId:', info.messageId);
 }
