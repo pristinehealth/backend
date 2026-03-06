@@ -41,7 +41,7 @@ export default function RegisterPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-900 font-sans selection:bg-indigo-500/30">
+        <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-900 font-sans selection:bg-brand-blue-light/30">
             <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-3xl p-8 shadow-xl border border-slate-200 dark:border-slate-700">
                 <div className="text-center mb-8">
                     <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
@@ -76,7 +76,7 @@ export default function RegisterPage() {
                                 required
                                 value={formData.name}
                                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
+                                className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-blue-light/50 focus:border-brand-blue-light transition-colors"
                                 placeholder="John Doe"
                             />
                         </div>
@@ -90,7 +90,7 @@ export default function RegisterPage() {
                                 required
                                 value={formData.email}
                                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
+                                className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-blue-light/50 focus:border-brand-blue-light transition-colors"
                                 placeholder="admin@pristine.com"
                             />
                         </div>
@@ -104,7 +104,7 @@ export default function RegisterPage() {
                                 required
                                 value={formData.password}
                                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
+                                className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand-blue-light/50 focus:border-brand-blue-light transition-colors"
                                 placeholder="••••••••"
                             />
                         </div>
@@ -112,7 +112,7 @@ export default function RegisterPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full py-3.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all disabled:opacity-70 disabled:cursor-not-allowed custom-shadow shadow-indigo-500/20 flex justify-center items-center gap-2 active:scale-[0.98] mt-2"
+                            className="w-full py-3.5 px-4 bg-brand-blue hover:bg-brand-blue-dark text-white font-bold rounded-xl transition-all disabled:opacity-70 disabled:cursor-not-allowed custom-shadow shadow-brand-blue-light/20 flex justify-center items-center gap-2 active:scale-[0.98] mt-2"
                         >
                             {loading ? (
                                 <>
@@ -127,7 +127,7 @@ export default function RegisterPage() {
                 )}
 
                 <div className="mt-8 text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                    Already have an account? <a href="/login" className="text-indigo-600 dark:text-indigo-400 hover:underline">Log in here</a>
+                    Already have an account? <a href="/login" className="text-brand-blue dark:text-brand-blue-light hover:underline">Log in here</a>
                 </div>
             </div>
         </div>

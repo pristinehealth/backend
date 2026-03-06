@@ -31,10 +31,11 @@ const Timesheet = createDynamicModel('Timesheet', 'timesheets');
 async function fetchPaginatedResource(endpoint, identifierKey, Model) {
     console.log(`[Cron] Syncing -> ${Model.modelName}`);
     let start = 0;
-    const length = 50; // Fetch 50 records per chunk
+    const length = 50;
     let hasMore = true;
     let totalSynced = 0;
     const activeIds = [];
+    let fetchError = false;
 
     while (hasMore) {
         const paginatedUrl = `${PERFEX_ENDPOINT}/${endpoint}?start=${start}&length=${length}`;
@@ -52,7 +53,8 @@ async function fetchPaginatedResource(endpoint, identifierKey, Model) {
 
             if (!response.ok) {
                 console.error(`[Cron] Failed to fetch ${endpoint} at start=${start}: ${response.statusText}`);
-                break;
+                fetchError = true;
+                break; // stop — do NOT orphan-delete with incomplete activeIds
             }
 
             const rawData = await response.json();
@@ -63,11 +65,9 @@ async function fetchPaginatedResource(endpoint, identifierKey, Model) {
                 break;
             }
 
-            // Prepare BulkWrite Operations for this chunk
             const bulkOps = chunk.map(item => {
                 const idValue = item[identifierKey];
-                activeIds.push(idValue); // Track active entities to prune deleted ones later
-
+                activeIds.push(idValue);
                 return {
                     updateOne: {
                         filter: { [identifierKey]: idValue },
@@ -77,32 +77,34 @@ async function fetchPaginatedResource(endpoint, identifierKey, Model) {
                 };
             });
 
-            // Execute the bulk write
             if (bulkOps.length > 0) {
                 await Model.bulkWrite(bulkOps);
                 totalSynced += bulkOps.length;
                 console.log(`[Cron]     ✔ Synced ${chunk.length} ${Model.modelName}s (Total: ${totalSynced})`);
             }
 
-            // Check if we reached the absolute end
             if (chunk.length < length) {
                 hasMore = false;
             } else {
-                start += length; // Increment pagination array offset
+                start += length;
             }
 
         } catch (error) {
             console.error(`[Cron] Fatal fetch error during ${endpoint} pagination loop:`, error.message);
+            fetchError = true;
             break;
         }
     }
 
-    // After all pages are ingested, delete local orphan documents that were deleted upstream
-    if (activeIds.length > 0) {
+    // Only prune orphans when ALL pages were fetched — a partial activeIds list
+    // would incorrectly delete records that still exist in Perfex.
+    if (!fetchError && activeIds.length > 0) {
         const deleteResult = await Model.deleteMany({ [identifierKey]: { $nin: activeIds } });
         if (deleteResult.deletedCount > 0) {
             console.log(`[Cron]     🗑️  Deleted ${deleteResult.deletedCount} orphaned ${Model.modelName}s from local cache.`);
         }
+    } else if (fetchError) {
+        console.warn(`[Cron]     ⚠️  Skipping orphan pruning for ${Model.modelName} — fetch was incomplete.`);
     }
 
     console.log(`[Cron] ✅  Finished syncing ${Model.modelName}. Total active: ${activeIds.length}\n`);
@@ -136,10 +138,13 @@ async function runSync() {
     }
 }
 
-// Start immediately on script boot, then schedule for every 5 minutes
-console.log("[Cron] Booting up background synchronization daemon...");
-runSync();
+// Nightly maintenance sync — hour is configurable via SYNC_HOUR env var (0-23, default 2).
+// Write-through persistence means the local DB is already current for all mobile
+// write operations (start/stop shift). This is cleanup-only, not the primary read path.
+const syncHour = parseInt(process.env.SYNC_HOUR || '2', 10);
+console.log(`[Cron] Nightly sync daemon armed. Scheduled for ${String(syncHour).padStart(2, '0')}:00 every night.`);
 
-cron.schedule('*/5 * * * *', () => {
+cron.schedule(`0 ${syncHour} * * *`, () => {
+    console.log('[Cron] Nightly maintenance sync triggered.');
     runSync();
 });

@@ -14,12 +14,17 @@ export async function POST(req: Request) {
 
         await dbConnect();
 
-        // 1. Find Staff by Email
-        const staff = await Staff.findOne({ email });
+        // 1. Find Staff by Email — case-insensitive, active only
+        //    If not found or inactive, return the same generic 200 to prevent
+        //    email enumeration (attacker can't tell the difference).
+        const staff = await Staff.findOne({
+            email: { $regex: new RegExp(`^${email}$`, 'i') },
+            active: '1'
+        });
 
         if (!staff) {
-            // Return 200 even if not found to prevent email enumeration
-            return NextResponse.json({ message: 'If an account with that email exists, an OTP has been sent.' });
+            console.warn(`[OTP] Blocked OTP request for unrecognised/inactive email: ${email}`);
+            return NextResponse.json({ error: 'No active staff account found with that email address.' }, { status: 404 });
         }
 
         // 2. Generate 6-digit OTP
