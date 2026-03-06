@@ -38,8 +38,12 @@ export async function POST(req: Request) {
         staff.otpExpiry = otpExpiry;
         await staff.save();
 
-        // 5. Send Email
-        await sendOtpEmail(email, otpCode, staff.firstname);
+        // 5. Send Email — fire and forget so the HTTP response returns instantly.
+        // Gmail SMTP on cloud servers can take several seconds; we don't want the
+        // mobile to hang waiting for the SMTP handshake to complete.
+        sendOtpEmail(email, otpCode, staff.firstname).catch(err =>
+            console.error('[OTP] Background email send failed:', err.message)
+        );
 
         return NextResponse.json({ message: 'If an account with that email exists, an OTP has been sent.' });
 
