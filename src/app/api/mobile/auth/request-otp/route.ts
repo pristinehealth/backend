@@ -7,6 +7,7 @@ import nodemailer from 'nodemailer';
 export async function POST(req: Request) {
     try {
         const { email } = await req.json();
+        console.log(`[OTP] Request received for: ${email}`);
 
         if (!email) {
             return NextResponse.json({ error: 'Email is required' }, { status: 400 });
@@ -15,17 +16,17 @@ export async function POST(req: Request) {
         await dbConnect();
 
         // 1. Find Staff by Email — case-insensitive, active only
-        //    If not found or inactive, return the same generic 200 to prevent
-        //    email enumeration (attacker can't tell the difference).
         const staff = await Staff.findOne({
             email: { $regex: new RegExp(`^${email}$`, 'i') },
             active: '1'
         });
 
         if (!staff) {
-            console.warn(`[OTP] Blocked OTP request for unrecognised/inactive email: ${email}`);
+            console.warn(`[OTP] Blocked — no active staff for: ${email}`);
             return NextResponse.json({ error: 'No active staff account found with that email address.' }, { status: 404 });
         }
+
+        console.log(`[OTP] Staff found: ${staff.firstname} ${staff.lastname} (id=${staff.staffid})`);
 
         // 2. Generate 6-digit OTP
         const otpCode = crypto.randomInt(100000, 999999).toString();
@@ -37,6 +38,7 @@ export async function POST(req: Request) {
         staff.otpCode = otpCode;
         staff.otpExpiry = otpExpiry;
         await staff.save();
+        console.log(`[OTP] Code saved for ${email}, expiry: ${otpExpiry.toISOString()}`);
 
         // 5. Send Email — fire and forget so the HTTP response returns instantly.
         // Gmail SMTP on cloud servers can take several seconds; we don't want the
@@ -44,11 +46,12 @@ export async function POST(req: Request) {
         sendOtpEmail(email, otpCode, staff.firstname).catch(err =>
             console.error('[OTP] Background email send failed:', err.message)
         );
+        console.log(`[OTP] Email dispatch fired (background) → responding 200`);
 
         return NextResponse.json({ message: 'If an account with that email exists, an OTP has been sent.' });
 
     } catch (error: any) {
-        console.error('OTP Request Error:', error);
+        console.error('[OTP] Unhandled error:', error);
         return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
 }
