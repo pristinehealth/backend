@@ -3,6 +3,16 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Pristine Health Brand Colors */
+  --brand-blue: #3B6BB5;
+  --brand-blue-dark: #2D5599;
+  --brand-blue-light: #5585CC;
+  --brand-blue-muted: #EEF3FB;
+  --brand-orange: #F0A030;
+  --brand-orange-dark: #D8881A;
+  --brand-orange-light: #F5B84D;
+  --brand-orange-muted: #FEF6E7;
 }
 
 @theme inline {
@@ -10,6 +20,16 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* Expose brand colors as Tailwind utilities */
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-blue-dark: var(--brand-blue-dark);
+  --color-brand-blue-light: var(--brand-blue-light);
+  --color-brand-blue-muted: var(--brand-blue-muted);
+  --color-brand-orange: var(--brand-orange);
+  --color-brand-orange-dark: var(--brand-orange-dark);
+  --color-brand-orange-light: var(--brand-orange-light);
+  --color-brand-orange-muted: var(--brand-orange-muted);
 }
 
 @layer utilities {

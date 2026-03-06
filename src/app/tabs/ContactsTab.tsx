@@ -11,7 +11,7 @@ export function ContactsTab() {
     if (isLoading) {
         return (
             <div className="flex flex-col items-center justify-center py-20">
-                <Loader2 className="h-10 w-10 text-indigo-500 animate-spin" />
+                <Loader2 className="h-10 w-10 text-brand-blue-light animate-spin" />
             </div>
         );
     }

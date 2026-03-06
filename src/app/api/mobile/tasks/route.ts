@@ -66,8 +66,13 @@ export async function GET(req: Request) {
         };
 
         const totalTasks = await Task.countDocuments(query);
+
+        // Sort: put status=5 (completed) tasks by most recently added/finished, active tasks by startdate.
+        // We use a compound sort: status ascending (so "5" = completed is last in active view but fetched together)
+        // then datefinished desc (for completed), then startdate desc (for active).
+        // This ensures the page slice is useful regardless of which filter the user is on.
         const rawTasks = await Task.find(query)
-            .sort({ startdate: -1 })
+            .sort({ datefinished: -1, startdate: -1, dateadded: -1 })
             .skip(startParam)
             .limit(lengthParam)
             .lean();
@@ -80,6 +85,15 @@ export async function GET(req: Request) {
                 const proj = await Project.findOne({ id: task.project_data.id }).select('customfields').lean();
                 if (proj && proj.customfields) {
                     task.project_data.customfields = proj.customfields;
+
+                    // Explicitly hoist the address strings for mobile list rendering
+                    const addressField = proj.customfields.find((f: any) => f.label?.toLowerCase().includes("address"));
+                    const cityField = proj.customfields.find((f: any) => f.label?.toLowerCase().includes("city"));
+                    const stateField = proj.customfields.find((f: any) => f.label?.toLowerCase().includes("state") || f.label?.toLowerCase() === "st");
+
+                    task.project_data.extracted_address = addressField?.value || "";
+                    task.project_data.extracted_city = cityField?.value || "";
+                    task.project_data.extracted_state = stateField?.value || "";
                 }
             }
             return task;

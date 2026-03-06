@@ -2,10 +2,26 @@ import { NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 import dbConnect from '@/lib/mongoose';
 import Staff from '@/models/Staff';
+import ServiceReport from '@/models/ServiceReport';
+import Project from '@/models/Project';
+import { uploadBase64Image } from '@/lib/cloudinary';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-dev-secret-please-change-in-prod';
 const PERFEX_ENDPOINT = process.env.PERFEX_ENDPOINT;
 const PERFEX_ADMIN_TOKEN = process.env.PERFEX_ADMIN_TOKEN;
+
+// Server-side Haversine Distance computation
+function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371e3; // Earth radius in meters
+    const rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad;
+    const dLon = (lon2 - lon1) * rad;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * rad) * Math.cos(lat2 * rad) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
 
 export async function POST(req: Request) {
     try {
@@ -32,7 +48,7 @@ export async function POST(req: Request) {
         }
 
         const body = await req.json();
-        const { task_id, action, note, checklist_items, questionnaire } = body;
+        const { task_id, action, note, checklist_items, questionnaire, customer_signature, staff_signature, user_lat, user_lng } = body;
 
         if (!task_id || !action) {
             return NextResponse.json({ error: 'task_id and action (start/stop) are required' }, { status: 400 });
@@ -45,6 +61,36 @@ export async function POST(req: Request) {
         // Create a new Timesheet with no end time (end_time = '0')
         // ---------------------------------------------------------
         if (action === 'start') {
+            // Retrieve root Task object to check Project associations
+            const TaskModel = (await import('@/models/Task')).default;
+            const taskDoc = await TaskModel.findOne({ id: task_id });
+
+            // If coordinates were submitted, it means the facility mandates a geofence check
+            if (user_lat !== undefined && user_lng !== undefined && taskDoc && taskDoc.project_data && taskDoc.project_data.id) {
+                const proj = await Project.findOne({ id: taskDoc.project_data.id }).lean();
+                if (proj && proj.customfields) {
+                    const latField = proj.customfields.find((f: any) => f.label?.toLowerCase().includes("latitude"));
+                    const lngField = proj.customfields.find((f: any) => f.label?.toLowerCase().includes("longitude"));
+                    const radiusField = proj.customfields.find((f: any) => f.label?.toLowerCase().includes("radius"));
+
+                    const targetLat = latField?.value ? parseFloat(latField.value) : null;
+                    const targetLng = lngField?.value ? parseFloat(lngField.value) : null;
+                    const allowedRadius = radiusField && !isNaN(parseFloat(radiusField.value)) ? parseFloat(radiusField.value) : 20;
+
+                    // If the project natively defines GPS coordinates
+                    if (targetLat !== null && !isNaN(targetLat) && targetLng !== null && !isNaN(targetLng)) {
+                        const dist = getDistance(parseFloat(user_lat), parseFloat(user_lng), targetLat, targetLng);
+
+                        if (dist > allowedRadius) {
+                            return NextResponse.json(
+                                { error: `Out of Range. You are ${Math.round(dist)}m away from the facility.` },
+                                { status: 403 }
+                            );
+                        }
+                    }
+                }
+            }
+
             const start_time = Math.floor(Date.now() / 1000);
 
             const formData = new FormData();
@@ -65,8 +111,6 @@ export async function POST(req: Request) {
                 return NextResponse.json({ error: 'Failed to start timesheet in Perfex' }, { status: response.status });
             }
 
-            // Trigger sync
-            fetch(`${process.env.PUBLIC_BASE_URL}/api/sync/all`, { method: 'POST' }).catch(console.error);
 
             return NextResponse.json({
                 success: true,
@@ -99,6 +143,7 @@ export async function POST(req: Request) {
             }
 
             const end_time = Math.floor(Date.now() / 1000); // CRM strict int payload for PUT updates
+            const time_taken = new Date();
 
             // Format comprehensive Daily Notes
             let compiledNote = note ? `Shift Notes:\n${note}\n\n` : '';
@@ -138,6 +183,46 @@ export async function POST(req: Request) {
                 return NextResponse.json({ error: `Failed to update timesheet in Perfex: ${responseTS.statusText}` }, { status: responseTS.status });
             }
 
+            // --- SAVE ServiceReport TO MONGODB ---
+            try {
+                let parsedCustomerSignature = null;
+                let parsedStaffSignature = null;
+
+                if (customer_signature && typeof customer_signature === 'string' && customer_signature.startsWith('data:image')) {
+                    parsedCustomerSignature = await uploadBase64Image(customer_signature, 'pristine/signatures');
+                }
+
+                if (staff_signature && typeof staff_signature === 'string' && staff_signature.startsWith('data:image')) {
+                    parsedStaffSignature = await uploadBase64Image(staff_signature, 'pristine/signatures');
+                }
+
+                await ServiceReport.create({
+                    task_id: String(task_id),
+                    timesheet_id: activeNativeId,
+                    staff_id: String(staff_id),
+                    time_taken: time_taken,
+                    note: note,
+                    questionnaire: questionnaire || [],
+                    checklist_items: checklist_items || [],
+                    customer_signature: parsedCustomerSignature ? {
+                        url: parsedCustomerSignature.url,
+                        public_id: parsedCustomerSignature.public_id,
+                        provider: parsedCustomerSignature.provider
+                    } : null,
+                    staff_signature: parsedStaffSignature ? {
+                        url: parsedStaffSignature.url,
+                        public_id: parsedStaffSignature.public_id,
+                        provider: parsedStaffSignature.provider
+                    } : null
+                });
+                console.log(`[Mobile API] Successfully saved ServiceReport to MongoDB for task ${task_id}`);
+            } catch (srErr) {
+                console.error(`[Mobile API] Failed to save ServiceReport to MongoDB:`, srErr);
+                // We do not fail the request because the CRM update succeeded, 
+                // but we log the error aggressively.
+            }
+            // -------------------------------------
+
             // Mark the task as Completed (status 5) per user instruction
             const taskUpdatePayload: any = { status: "5" };
 
@@ -174,8 +259,6 @@ export async function POST(req: Request) {
             }
             // ----------------------------------------------
 
-            // Sync down new data
-            fetch(`${process.env.PUBLIC_BASE_URL}/api/sync/all`, { method: 'POST' }).catch(console.error);
 
             return NextResponse.json({
                 success: true,

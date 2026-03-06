@@ -2,17 +2,16 @@
 
 import { useSession, signOut } from "next-auth/react";
 import { useState, useEffect } from "react";
-import { LogOut, Users, UsersRound, Building2, ClipboardList, Clock, RefreshCw, Menu, X, Play, Square } from "lucide-react";
+import { LogOut, Users, UsersRound, Building2, ClipboardList, RefreshCw, Menu, X, Play, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { StaffTab } from "./tabs/StaffTab";
 import { CustomersTab } from "./tabs/CustomersTab";
 import { ContactsTab } from "./tabs/ContactsTab";
 import { TasksTab } from "./tabs/TasksTab";
-import { TimesheetsTab } from "./tabs/TimesheetsTab";
 import { ProjectsTab } from "./tabs/ProjectsTab";
 
-type TabOption = "staff" | "customers" | "contacts" | "tasks" | "timesheets" | "projects";
+type TabOption = "staff" | "customers" | "contacts" | "tasks" | "projects";
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
@@ -77,7 +76,7 @@ export default function Dashboard() {
   if (status === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-blue"></div>
       </div>
     );
   }
@@ -86,7 +85,7 @@ export default function Dashboard() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900">
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Access Denied</h2>
-        <a href="/login" className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold">Go to Login</a>
+        <a href="/login" className="bg-brand-blue text-white px-6 py-2 rounded-xl font-bold">Go to Login</a>
       </div>
     );
   }
@@ -97,18 +96,12 @@ export default function Dashboard() {
     { id: "contacts", label: "Contacts", icon: UsersRound },
     { id: "projects", label: "Projects", icon: ClipboardList },
     { id: "tasks", label: "Tasks", icon: ClipboardList },
-    { id: "timesheets", label: "Timesheets", icon: Clock },
   ] as const;
 
   const SidebarContent = () => (
     <>
-      <div className="p-6 border-b border-slate-200 dark:border-slate-800">
-        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
-          Pristine CRM
-        </h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 truncate">
-          Welcome, <span className="font-semibold">{session?.user?.name}</span>
-        </p>
+      <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-center">
+        <img src="/logo.png" alt="Pristine Health" className="h-16 w-auto" />
       </div>
 
       <div className="p-4 flex-1 space-y-1 overflow-y-auto">
@@ -122,11 +115,11 @@ export default function Dashboard() {
               className={cn(
                 "w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium text-sm transition-all",
                 activeTab === tab.id
-                  ? "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
-                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50"
+                  ? "bg-brand-blue-muted dark:bg-brand-blue-light/10 text-brand-blue dark:text-brand-blue-light border-l-2 border-brand-orange"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 border-l-2 border-transparent"
               )}
             >
-              <Icon className={cn("h-5 w-5", activeTab === tab.id ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400")} />
+              <Icon className={cn("h-5 w-5", activeTab === tab.id ? "text-brand-orange" : "text-slate-400")} />
               {tab.label}
             </button>
           );
@@ -159,9 +152,9 @@ export default function Dashboard() {
         <button
           onClick={handleGlobalSync}
           disabled={isSyncing}
-          className="w-full flex items-center justify-start gap-3 px-3 py-2 mt-1 rounded-lg font-medium text-sm transition-all text-slate-600 dark:text-slate-400 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full flex items-center justify-start gap-3 px-3 py-2 mt-1 rounded-lg font-medium text-sm transition-all text-slate-600 dark:text-slate-400 hover:bg-brand-blue-muted dark:hover:bg-brand-blue-light/10 hover:text-brand-blue dark:hover:text-brand-blue-light disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <RefreshCw className={cn("h-5 w-5", isSyncing && "animate-spin text-indigo-500")} />
+          <RefreshCw className={cn("h-5 w-5", isSyncing && "animate-spin text-brand-blue-light")} />
           {isSyncing ? 'Syncing All Data...' : 'Manual Sync All'}
         </button>
       </div>
@@ -211,7 +204,6 @@ export default function Dashboard() {
             {activeTab === "contacts" && <ContactsTab />}
             {activeTab === "projects" && <ProjectsTab />}
             {activeTab === "tasks" && <TasksTab />}
-            {activeTab === "timesheets" && <TimesheetsTab />}
           </div>
         </main>
       </div>

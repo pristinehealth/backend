@@ -31,10 +31,15 @@ export const perfexApi = createApi({
             query: () => "contacts",
             providesTags: ["Contacts"],
         }),
-        getTasks: builder.query<any, { page?: number; limit?: number } | void>({
+        getTasks: builder.query<any, { page?: number; limit?: number; staff?: string; date?: string } | void>({
             query: (arg) => {
                 if (!arg) return "tasks";
-                return `tasks?page=${arg.page || 1}&limit=${arg.limit || 50}`;
+                const params = new URLSearchParams();
+                if (arg.page) params.set('page', String(arg.page));
+                if (arg.limit) params.set('limit', String(arg.limit));
+                if (arg.staff) params.set('staff', arg.staff);
+                if (arg.date) params.set('date', arg.date);
+                return `tasks?${params.toString()}`;
             },
             providesTags: ["Tasks"],
         }),
@@ -49,6 +54,10 @@ export const perfexApi = createApi({
             },
             providesTags: ["Timesheets"],
         }),
+        getServiceReportsByTaskId: builder.query<any, string>({
+            query: (taskId) => `service-reports?taskId=${taskId}`,
+            providesTags: ["Timesheets"], // Or cache by Task instead depending on your strategy
+        })
     }),
 });
 
@@ -62,5 +71,6 @@ export const {
     useGetTasksQuery,
     useGetProjectsQuery,
     useGetTimesheetsQuery,
+    useGetServiceReportsByTaskIdQuery,
     useSyncStaffMutation,
 } = perfexApi;
