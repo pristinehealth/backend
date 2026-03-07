@@ -16,6 +16,8 @@ export interface StaffDocument extends mongoose.Document {
     customfields?: any[];
     otpCode?: string | null;
     otpExpiry?: Date | null;
+    passwordHash?: string | null;
+    emailVerified?: boolean;
     activeTimer?: { taskId: string, startTime: number };
 }
 
@@ -71,6 +73,14 @@ const StaffSchema = new mongoose.Schema<StaffDocument>(
         otpExpiry: {
             type: Date,
             default: null,
+        },
+        passwordHash: {
+            type: String,
+            default: null,
+        },
+        emailVerified: {
+            type: Boolean,
+            default: false,
         },
         activeTimer: {
             taskId: { type: String },

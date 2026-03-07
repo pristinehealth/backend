@@ -1,17 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useGetStaffQuery, useGetStaffByIdQuery } from "@/lib/features/api/perfexApi";
-import { Mail, Phone, AlertCircle, Loader2, X, Briefcase, CalendarDays, Fingerprint, ListTodo, Search, User } from "lucide-react";
+import { Mail, Phone, AlertCircle, Loader2, X, Briefcase, CalendarDays, Fingerprint, ListTodo, Search, User, ShieldCheck, ShieldAlert, ShieldX } from "lucide-react";
 
 export function StaffTab() {
     const [selectedStaffId, setSelectedStaffId] = useState<string | null>(null);
     const [search, setSearch] = useState("");
+    const [authStatus, setAuthStatus] = useState<Record<string, { emailVerified: boolean; hasPassword: boolean }>>({});
 
     const { data: rawData, isLoading, error: rtkError } = useGetStaffQuery();
     const { data: rawDetails, isLoading: detailsLoading } = useGetStaffByIdQuery(selectedStaffId as string, {
         skip: !selectedStaffId
     });
+
+    useEffect(() => {
+        fetch('/api/staff/auth-status')
+            .then(r => r.json())
+            .then(d => { if (d.data) setAuthStatus(d.data); })
+            .catch(() => { });
+    }, []);
 
     const staffList: any[] = Array.isArray(rawData) ? rawData : (rawData && Array.isArray(rawData.data) ? rawData.data : []);
     const staffDetails = rawDetails && !Array.isArray(rawDetails) ? rawDetails : null;
@@ -47,32 +55,48 @@ export function StaffTab() {
                                 <th className="p-4">Email</th>
                                 <th className="p-4">Phone</th>
                                 <th className="p-4">ID</th>
+                                <th className="p-4">App Status</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
                             {!filtered.length ? (
                                 <tr><td colSpan={4} className="text-center py-12 text-slate-400">{search ? `No staff matching "${search}".` : "No staff found."}</td></tr>
-                            ) : filtered.map((staff) => (
-                                <tr
-                                    key={staff.staffid}
-                                    onClick={() => setSelectedStaffId(staff.staffid)}
-                                    className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors group"
-                                >
-                                    <td className="p-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="h-9 w-9 rounded-xl bg-brand-blue-muted text-brand-blue font-bold flex items-center justify-center text-sm group-hover:bg-brand-blue group-hover:text-white transition-colors">
-                                                {staff.firstname?.[0]}{staff.lastname?.[0]}
+                            ) : filtered.map((staff) => {
+                                const status = authStatus[String(staff.staffid)];
+                                const badge = !status || !status.hasPassword
+                                    ? { label: 'Not Registered', icon: ShieldX, cls: 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500' }
+                                    : !status.emailVerified
+                                        ? { label: 'Unverified', icon: ShieldAlert, cls: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' }
+                                        : { label: 'Verified', icon: ShieldCheck, cls: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' };
+                                const BadgeIcon = badge.icon;
+                                return (
+                                    <tr
+                                        key={staff.staffid}
+                                        onClick={() => setSelectedStaffId(staff.staffid)}
+                                        className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors group"
+                                    >
+                                        <td className="p-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="h-9 w-9 rounded-xl bg-brand-blue-muted text-brand-blue font-bold flex items-center justify-center text-sm group-hover:bg-brand-blue group-hover:text-white transition-colors">
+                                                    {staff.firstname?.[0]}{staff.lastname?.[0]}
+                                                </div>
+                                                <span className="font-semibold text-slate-900 dark:text-white group-hover:text-brand-blue dark:group-hover:text-brand-blue-light transition-colors">
+                                                    {staff.firstname} {staff.lastname}
+                                                </span>
                                             </div>
-                                            <span className="font-semibold text-slate-900 dark:text-white group-hover:text-brand-blue dark:group-hover:text-brand-blue-light transition-colors">
-                                                {staff.firstname} {staff.lastname}
+                                        </td>
+                                        <td className="p-4 text-sm text-slate-600 dark:text-slate-300">{staff.email || <span className="text-slate-400 italic">N/A</span>}</td>
+                                        <td className="p-4 text-sm text-slate-600 dark:text-slate-300">{staff.phonenumber || <span className="text-slate-400 italic">N/A</span>}</td>
+                                        <td className="p-4 text-sm text-slate-400 font-mono">#{staff.staffid}</td>
+                                        <td className="p-4">
+                                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${badge.cls}`}>
+                                                <BadgeIcon className="h-3.5 w-3.5" />
+                                                {badge.label}
                                             </span>
-                                        </div>
-                                    </td>
-                                    <td className="p-4 text-sm text-slate-600 dark:text-slate-300">{staff.email || <span className="text-slate-400 italic">N/A</span>}</td>
-                                    <td className="p-4 text-sm text-slate-600 dark:text-slate-300">{staff.phonenumber || <span className="text-slate-400 italic">N/A</span>}</td>
-                                    <td className="p-4 text-sm text-slate-400 font-mono">#{staff.staffid}</td>
-                                </tr>
-                            ))}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -101,6 +125,13 @@ export function StaffTab() {
                                         <div>
                                             <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">{staffDetails.firstname} {staffDetails.lastname}</h2>
                                             <span className="inline-flex mt-1 items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-brand-orange/10 text-brand-orange"><Fingerprint className="h-3 w-3" /> ID: {staffDetails.staffid}</span>
+                                            {/* App verification badge */}
+                                            {(() => {
+                                                const s = authStatus[String(staffDetails.staffid)];
+                                                if (!s || !s.hasPassword) return <span className="inline-flex mt-2 ml-1 items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"><ShieldX className="h-3 w-3" /> App: Not Registered</span>;
+                                                if (!s.emailVerified) return <span className="inline-flex mt-2 ml-1 items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400"><ShieldAlert className="h-3 w-3" /> App: Unverified</span>;
+                                                return <span className="inline-flex mt-2 ml-1 items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"><ShieldCheck className="h-3 w-3" /> App: Verified</span>;
+                                            })()}
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
