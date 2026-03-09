@@ -30,18 +30,32 @@ export async function GET(req: Request) {
 
         await dbConnect();
 
-        // 1. Fetch timesheets where end_time exists and staff_id matches
+        // 1. Fetch completed timesheets for this staff member
+        // Exclude active timesheets: end_time can be null, "", "0" (string) or 0 (integer)
         const query = {
             staff_id: staffid.toString(),
-            end_time: { $ne: null, $nin: ["", "0"] }
+            end_time: { $nin: [null, "", "0", 0], $exists: true }
         };
 
         const totalTimesheets = await Timesheet.countDocuments(query);
-        const rawTimesheets = await Timesheet.find(query)
-            .sort({ start_time: -1 }) // Descending: Newest first
-            .skip(startParam)
-            .limit(lengthParam)
-            .lean();
+
+        // Fetch ALL matching timesheets, sort globally, then paginate manually.
+        // This is necessary because end_time is stored in mixed formats (UNIX int string
+        // vs "YYYY-MM-DD HH:MM:SS") so MongoDB can't sort them natively.
+        const allTimesheets = await Timesheet.find(query).lean();
+
+        // Normalise end_time to ms — handles UNIX seconds strings and datetime strings
+        const toMs = (t: any): number => {
+            const v = String(t.end_time || '0');
+            if (/^\d{10,}$/.test(v)) return parseInt(v) * 1000;   // UNIX seconds → ms
+            const parsed = new Date(v.replace(' ', 'T')).getTime();
+            return isNaN(parsed) ? 0 : parsed;
+        };
+
+        allTimesheets.sort((a, b) => toMs(b) - toMs(a)); // newest end_time first
+
+        // Paginate after sorting
+        const rawTimesheets = allTimesheets.slice(startParam, startParam + lengthParam);
 
         // 2. Hydrate task names on the fly
         const taskIds = [...new Set(rawTimesheets.map(t => t.task_id))];

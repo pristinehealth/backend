@@ -64,8 +64,24 @@ export async function POST(req: Request) {
         // Create a new Timesheet with no end time (end_time = '0')
         // ---------------------------------------------------------
         if (action === 'start') {
-            // Retrieve root Task object to check Project associations
+            // ── Guard: prevent clocking into two shifts simultaneously ──────────
             const TaskModel = (await import('@/models/Task')).default;
+            const activeTask = await TaskModel.findOne({
+                status: '4',
+                $or: [
+                    { 'assignees.assigneeid': String(staff_id) },
+                    { assignees: String(staff_id) }
+                ]
+            }).lean();
+
+            if (activeTask) {
+                return NextResponse.json(
+                    { error: 'You are already clocked into another shift. Please stop that shift before starting a new one.' },
+                    { status: 409 }
+                );
+            }
+            // ─────────────────────────────────────────────────────────────────────
+
             const taskDoc = await TaskModel.findOne({ id: task_id });
 
             // If coordinates were submitted, it means the facility mandates a geofence check
@@ -113,6 +129,30 @@ export async function POST(req: Request) {
                 return NextResponse.json({ error: 'Failed to start timesheet in Perfex' }, { status: response.status });
             }
 
+            // ── Sync status 4 (In Progress) to Perfex — non-blocking ─────────────
+            // Fire-and-warn: a failure here doesn't block the shift start.
+            // Include rel_type/rel_id so Perfex doesn't tear down project links on PUT.
+            try {
+                const perfexTaskPayload: any = { status: '4' };
+                if (taskDoc?.rel_type) perfexTaskPayload.rel_type = taskDoc.rel_type;
+                else if (taskDoc?.project_data?.id) perfexTaskPayload.rel_type = 'project';
+                if (taskDoc?.rel_id) perfexTaskPayload.rel_id = taskDoc.rel_id;
+                else if (taskDoc?.project_data?.id) perfexTaskPayload.rel_id = taskDoc.project_data.id;
+
+                const perfexStatusRes = await fetchPerfex(`/tasks/${task_id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify(perfexTaskPayload)
+                });
+                if (!perfexStatusRes.ok) {
+                    console.warn(`[Perfex] Failed to set task ${task_id} → status 4:`, await perfexStatusRes.text());
+                } else {
+                    console.log(`[Perfex] Task ${task_id} → status 4 (In Progress).`);
+                }
+            } catch (perfexStatusErr) {
+                console.warn('[Perfex] Error syncing In Progress status:', perfexStatusErr);
+            }
+            // ─────────────────────────────────────────────────────────────────────
+
             // ── Write-through: persist new timesheet locally after confirmed Perfex success ──
             // Only runs after a 2xx from Perfex — never written speculatively.
             try {
@@ -158,21 +198,32 @@ export async function POST(req: Request) {
                         { upsert: true, new: true }
                     );
 
-                    // Push into Task.timesheets embedded array (avoid duplicates)
+                    // 1. Pull any stale entry with the same ID (de-dup guard)
                     const TaskModel = (await import('@/models/Task')).default;
                     await TaskModel.updateOne(
                         { id: task_id },
                         { $pull: { timesheets: { id: newTimesheetId } } }
                     );
+
+                    // 2. Push the new timesheet entry + flip status to In Progress in one shot
                     await TaskModel.updateOne(
-                        { id: task_id },
-                        { $push: { timesheets: { id: newTimesheetId, task_id: String(task_id), staff_id: String(staff_id), start_time: String(start_time), end_time: '0' } } }
+                        { id: task_id, status: { $ne: '5' } },
+                        {
+                            $push: { timesheets: { id: newTimesheetId, task_id: String(task_id), staff_id: String(staff_id), start_time: String(start_time), end_time: '0' } },
+                            $set: { status: '4' }
+                        }
                     );
-                    console.log(`[Write-Through] Persisted new Timesheet ${newTimesheetId} to MongoDB.`);
+                    console.log(`[Write-Through] Timesheet ${newTimesheetId} saved, Task ${task_id} → In Progress.`);
                 } else {
                     // Extremely rare: both POST body and GET fallback failed to return an ID.
                     // The nightly cron will reconcile. Stop-shift will fall back to its own
                     // Perfex GET lookup to find the active timer.
+                    // Still update status to In Progress even without a timesheet ID.
+                    const TaskModel = (await import('@/models/Task')).default;
+                    await TaskModel.updateOne(
+                        { id: task_id, status: { $ne: '5' } },
+                        { $set: { status: '4' } }
+                    );
                     console.error('[Write-Through] Could not resolve timesheet ID from Perfex — nightly cron will reconcile.');
                 }
             } catch (localWriteErr) {
