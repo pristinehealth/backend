@@ -65,18 +65,46 @@ export async function POST(req: Request) {
         // ---------------------------------------------------------
         if (action === 'start') {
             // ── Guard: prevent clocking into two shifts simultaneously ──────────
+            // Check BOTH status='4' AND any task with an open embedded timesheet
+            // (end_time='0'). A sync may reset status back to '1' while the
+            // timesheet is still open, so we can't rely on status alone.
             const TaskModel = (await import('@/models/Task')).default;
-            const activeTask = await TaskModel.findOne({
-                status: '4',
+            const staffIdStr = String(staff_id);
+            const assigneeFilter = {
                 $or: [
-                    { 'assignees.assigneeid': String(staff_id) },
-                    { assignees: String(staff_id) }
+                    { 'assignees.assigneeid': staffIdStr },
+                    { assignees: staffIdStr }
+                ]
+            };
+            const activeTask = await TaskModel.findOne({
+                $and: [
+                    assigneeFilter,
+                    {
+                        $or: [
+                            { status: '4' },
+                            {
+                                timesheets: {
+                                    $elemMatch: {
+                                        staff_id: staffIdStr,
+                                        $or: [
+                                            { end_time: '0' },
+                                            { end_time: null },
+                                            { end_time: '' }
+                                        ]
+                                    }
+                                }
+                            }
+                        ]
+                    }
                 ]
             }).lean();
 
             if (activeTask) {
                 return NextResponse.json(
-                    { error: 'You are already clocked into another shift. Please stop that shift before starting a new one.' },
+                    {
+                        error: 'You already have a shift in progress. Please end that shift before starting a new one.',
+                        active_task_id: (activeTask as any).id
+                    },
                     { status: 409 }
                 );
             }
@@ -231,6 +259,21 @@ export async function POST(req: Request) {
                 console.error('[Write-Through] Failed to persist start timesheet locally:', localWriteErr);
             }
             // ─────────────────────────────────────────────────────────────────────
+
+            // ── Real-time notification ─────────────────────────────────────────
+            // Push shift:started to the caregiver's socket room so the home tab
+            // refreshes immediately and reflects status='4' (In Progress).
+            try {
+                getIO().to(`staff:${staff_id}`).emit('shift:started', {
+                    task_id,
+                    staff_id,
+                    timestamp: Date.now(),
+                });
+                console.log(`[Socket.IO] Emitted shift:started → room staff:${staff_id}`);
+            } catch (socketErr) {
+                console.warn('[Socket.IO] Failed to emit shift:started:', socketErr);
+            }
+            // ──────────────────────────────────────────────────────────────────
 
             return NextResponse.json({
                 success: true,
