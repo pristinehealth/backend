@@ -12,12 +12,14 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
         }
 
+        const normalizedEmail = email.toLowerCase().trim();
+
         await dbConnect();
 
         // ── Perfex Staff Gate ──────────────────────────────────────────────────
         // Only allow registration if the email belongs to a Perfex staff member
         // with admin === "1". The Staff collection is synced from Perfex via cron.
-        const staffRecord = await Staff.findOne({ email: email.toLowerCase().trim() }).lean() as any;
+        const staffRecord = await Staff.findOne({ email: normalizedEmail }).lean() as any;
 
         if (!staffRecord) {
             return NextResponse.json(
@@ -35,7 +37,7 @@ export async function POST(req: Request) {
         // ──────────────────────────────────────────────────────────────────────
 
         // Check if dashboard user already exists
-        const existingUser = await User.findOne({ email });
+        const existingUser = await User.findOne({ email: normalizedEmail });
         if (existingUser) {
             return NextResponse.json({ error: 'An account with this email already exists.' }, { status: 400 });
         }
@@ -44,7 +46,7 @@ export async function POST(req: Request) {
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await User.create({
             name: name || `${staffRecord.firstname} ${staffRecord.lastname}`.trim(),
-            email,
+            email: normalizedEmail,
             password: hashedPassword,
         });
 
