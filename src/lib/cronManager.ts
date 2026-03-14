@@ -53,6 +53,36 @@ class CronManager {
         this.scheduleNext();
     }
 
+    /**
+     * Called on server boot (first DB connect).
+     * Fires an immediate full sync then arms the normal schedule.
+     * The schedule is always armed via .finally() — sync failure won't prevent it.
+     */
+    public startWithImmediateSync() {
+        if (this.timerId) clearTimeout(this.timerId);
+        this.isActive = true;
+
+        const baseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+        console.log('[CronManager] Server boot — running immediate startup sync...');
+
+        fetch(`${baseUrl}/api/sync/all`, { method: 'POST' })
+            .then(async (res) => {
+                if (!res.ok) {
+                    console.error(`[CronManager] Startup sync failed with status: ${res.status}`);
+                } else {
+                    const data = await res.json();
+                    console.log('[CronManager] Startup sync completed.', JSON.stringify(data.results));
+                }
+            })
+            .catch((err: any) => {
+                console.error('[CronManager] Startup sync error:', err.message);
+            })
+            .finally(() => {
+                // Always arm the regular schedule after startup sync, win or lose
+                if (this.isActive) this.scheduleNext();
+            });
+    }
+
     private scheduleNext() {
         getSyncConfig().then((cfg) => {
             if (!this.isActive) return;
