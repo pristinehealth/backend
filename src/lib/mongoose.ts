@@ -33,11 +33,10 @@ async function dbConnect() {
         cached.promise = mongoose.connect(MONGODB_URI!, opts).then((mongoose) => {
             console.log('MongoDB connected successfully');
 
-            // On first boot: fire an immediate full sync then arm the normal schedule.
-            // On hot reloads in dev the global singleton preserves isActive, so this
-            // only runs once per process (the DB promise is cached too).
+            // Arm the cron schedule. The boot hydration sync is handled by server.js
+            // (POST /api/sync/all) so we only schedule the next regular run here.
             if (cronManager.getStatus().isActive) {
-                cronManager.startWithImmediateSync();
+                cronManager.start();
             }
 
             return mongoose;
