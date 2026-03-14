@@ -76,10 +76,24 @@ app.prepare().then(() => {
         console.log(`\n▲ Pristine Health Server ready on http://${hostname}:${port}`);
         console.log(`  Socket.IO attached at ws://${hostname}:${port}/socket.io\n`);
 
+        // ── Startup Config Summary ────────────────────────────────────────────
+        const mongoCluster = (process.env.MONGO_URI || '').replace(/\/\/.*@/, '//***@'); // mask credentials
+        console.log('[Config] ─────────────────────────────────────────');
+        console.log(`[Config]  NODE_ENV       : ${process.env.NODE_ENV || '(unset)'}`);
+        console.log(`[Config]  PORT           : ${port}`);
+        console.log(`[Config]  PUBLIC_BASE_URL: ${process.env.PUBLIC_BASE_URL || '(unset)'}`);
+        console.log(`[Config]  PERFEX_ENDPOINT: ${process.env.PERFEX_ENDPOINT || '(unset)'}`);
+        console.log(`[Config]  MONGO_URI      : ${mongoCluster || '(unset)'}`);
+        console.log(`[Config]  CORS_ORIGIN    : ${process.env.CORS_ORIGIN || '(unset)'}`);
+        console.log(`[Config]  NEXTAUTH_URL   : ${process.env.NEXTAUTH_URL || '(unset)'}`);
+        console.log('[Config] ─────────────────────────────────────────\n');
+        // ─────────────────────────────────────────────────────────────────────
+
         // Auto-arm the cron on every boot via the Next.js API layer (avoids direct TS import).
         // Small delay to let Next.js finish initialising its route handlers.
         setTimeout(async () => {
             try {
+                // 1. Arm the cron schedule
                 const res = await fetch(`http://${hostname}:${port}/api/cron`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -94,6 +108,21 @@ app.prepare().then(() => {
             } catch (err) {
                 console.warn('[Server] CronManager auto-start failed:', err.message);
             }
+
+            // 2. Fire an immediate startup sync so an empty DB gets populated right away.
+            //    This runs fire-and-forget — the server is already serving traffic by now.
+            console.log('[Server] Running startup sync (boot hydration)...');
+            fetch(`http://${hostname}:${port}/api/sync/all`, { method: 'POST' })
+                .then(async (r) => {
+                    if (!r.ok) {
+                        console.warn(`[Server] Startup sync returned ${r.status}`);
+                    } else {
+                        const data = await r.json();
+                        console.log('[Server] Startup sync complete.', JSON.stringify(data.results));
+                    }
+                })
+                .catch((err) => console.warn('[Server] Startup sync error:', err.message));
+
         }, 1500); // 1.5 s gives Next.js time to finish warming up
     });
 });
