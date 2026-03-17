@@ -17,7 +17,11 @@ export async function POST(req: Request) {
         const staff = await Staff.findOne({ email: email.trim().toLowerCase() });
 
         if (!staff) {
-            return NextResponse.json({ message: 'If an account with that email exists, a code has been sent.' });
+            return NextResponse.json({ error: 'No account found with this email address.' }, { status: 404 });
+        }
+
+        if (purpose === 'reset' && !staff.isBackendRegistered) {
+            return NextResponse.json({ error: 'Account not set up or previously deleted. Please register first.' }, { status: 403 });
         }
 
         const otpCode = crypto.randomInt(100000, 999999).toString();

@@ -27,7 +27,11 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Reset code has expired. Please request a new one.' }, { status: 401 });
         }
 
-        if (staff.otpCode !== code) {
+        const cleanCode = String(code).replace(/\D/g, '');
+
+        console.log(`[Reset-Password] DB OTP: "${staff.otpCode}", Passed OTP: "${code}", Cleaned: "${cleanCode}"`);
+
+        if (staff.otpCode !== cleanCode) {
             return NextResponse.json({ error: 'Invalid reset code.' }, { status: 401 });
         }
 
