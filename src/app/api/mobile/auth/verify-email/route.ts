@@ -25,7 +25,11 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'Verification code has expired. Please request a new one.' }, { status: 401 });
         }
 
-        if (staff.otpCode !== code) {
+        const cleanCode = String(code).replace(/\D/g, '');
+
+        console.log(`[Verify-Email] DB OTP: "${staff.otpCode}", Passed OTP Raw: "${code}", Cleaned: "${cleanCode}"`);
+
+        if (staff.otpCode !== cleanCode) {
             return NextResponse.json({ error: 'Invalid verification code.' }, { status: 401 });
         }
 

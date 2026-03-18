@@ -40,12 +40,15 @@ export async function POST(req: Request) {
         const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
 
         staff.passwordHash = passwordHash;
+        staff.isBackendRegistered = true;
         staff.emailVerified = false;
         staff.otpCode = otpCode;
         staff.otpExpiry = otpExpiry;
         if (!staff.firstname) staff.firstname = firstname.trim();
         if (!staff.lastname) staff.lastname = lastname.trim();
         await staff.save();
+        
+        console.log(`[Signup] Updated OTP for email ${staff.email} with staffid: ${staff.staffid}`);
 
         await sendOtpEmail(staff.email, otpCode, staff.firstname, 'verification');
 

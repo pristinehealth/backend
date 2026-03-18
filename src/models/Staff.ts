@@ -18,6 +18,7 @@ export interface StaffDocument extends mongoose.Document {
     otpExpiry?: Date | null;
     passwordHash?: string | null;
     emailVerified?: boolean;
+    isBackendRegistered?: boolean;
     activeTimer?: { taskId: string, startTime: number };
 }
 
@@ -79,6 +80,10 @@ const StaffSchema = new mongoose.Schema<StaffDocument>(
             default: null,
         },
         emailVerified: {
+            type: Boolean,
+            default: false,
+        },
+        isBackendRegistered: {
             type: Boolean,
             default: false,
         },

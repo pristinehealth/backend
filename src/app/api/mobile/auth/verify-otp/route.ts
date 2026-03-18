@@ -16,7 +16,7 @@ export async function POST(req: Request) {
         await dbConnect();
 
         // 1. Find Staff by Email
-        const staff = await Staff.findOne({ email });
+        const staff = await Staff.findOne({ email: email.trim().toLowerCase() });
 
         if (!staff) {
             return NextResponse.json({ error: 'Invalid or expired OTP' }, { status: 401 });
@@ -29,7 +29,8 @@ export async function POST(req: Request) {
         }
 
         // 3. Verify the Code matches
-        if (staff.otpCode !== code) {
+        const cleanCode = String(code).replace(/\D/g, '');
+        if (staff.otpCode !== cleanCode) {
             return NextResponse.json({ error: 'Invalid or expired OTP' }, { status: 401 });
         }
 
