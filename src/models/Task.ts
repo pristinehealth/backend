@@ -10,7 +10,10 @@ export interface TaskDocument extends mongoose.Document {
     duedate: string;
     status: string;
     hourly_rate: string;
-    milestone_name: string;
+    milestone?: string;       // Perfex milestone ID
+    milestone_name: string;   // Perfex milestone label
+    billable?: string;        // '1' = billable, '0' = not billable
+    is_public?: string;
     assignees?: any[];
     timesheets?: any[];
     checklist_items?: any[];
@@ -34,7 +37,10 @@ const TaskSchema = new mongoose.Schema<TaskDocument>(
         duedate: { type: String },
         status: { type: String },
         hourly_rate: { type: String },
+        milestone: { type: String },
         milestone_name: { type: String },
+        billable: { type: String },
+        is_public: { type: String },
         assignees: {
             type: [mongoose.Schema.Types.Mixed],
             default: []

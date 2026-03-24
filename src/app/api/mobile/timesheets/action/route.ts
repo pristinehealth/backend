@@ -13,6 +13,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-dev-secret-please-change-
 const PERFEX_ENDPOINT = process.env.PERFEX_ENDPOINT;
 const PERFEX_ADMIN_TOKEN = process.env.PERFEX_ADMIN_TOKEN;
 
+
 // Server-side Haversine Distance computation
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371e3; // Earth radius in meters
@@ -159,13 +160,23 @@ export async function POST(req: Request) {
 
             // ── Sync status 4 (In Progress) to Perfex — non-blocking ─────────────
             // Fire-and-warn: a failure here doesn't block the shift start.
-            // Include rel_type/rel_id so Perfex doesn't tear down project links on PUT.
+            // PUT is full-replace on Perfex — must include ALL existing fields or they get wiped.
             try {
                 const perfexTaskPayload: any = { status: '4' };
+                // Relational fields
                 if (taskDoc?.rel_type) perfexTaskPayload.rel_type = taskDoc.rel_type;
                 else if (taskDoc?.project_data?.id) perfexTaskPayload.rel_type = 'project';
                 if (taskDoc?.rel_id) perfexTaskPayload.rel_id = taskDoc.rel_id;
                 else if (taskDoc?.project_data?.id) perfexTaskPayload.rel_id = taskDoc.project_data.id;
+                // Preserve existing task fields so PUT doesn't wipe them
+                if (taskDoc?.name) perfexTaskPayload.name = taskDoc.name;
+                if (taskDoc?.startdate) perfexTaskPayload.startdate = taskDoc.startdate;
+                if (taskDoc?.duedate) perfexTaskPayload.duedate = taskDoc.duedate;
+                if (taskDoc?.priority) perfexTaskPayload.priority = taskDoc.priority;
+                if (taskDoc?.milestone) perfexTaskPayload.milestone = taskDoc.milestone;
+                if (taskDoc?.billable !== undefined && taskDoc.billable !== null) perfexTaskPayload.billable = taskDoc.billable;
+                if (taskDoc?.hourly_rate !== undefined) perfexTaskPayload.hourly_rate = taskDoc.hourly_rate;
+                if (taskDoc?.is_public !== undefined) perfexTaskPayload.is_public = taskDoc.is_public;
 
                 const perfexStatusRes = await fetchPerfex(`/tasks/${task_id}`, {
                     method: 'PUT',
@@ -404,22 +415,24 @@ export async function POST(req: Request) {
             // ─────────────────────────────────────────────────────────────────────
 
             // Mark the task as Completed (status 5) per user instruction
+            // PUT is full-replace on Perfex — must mirror ALL existing fields or they get cleared.
             const taskUpdatePayload: any = { status: "5" };
 
-            // Perfex aggressively tears down relational links on PUT unless explicitly provided
-            // We fallback to `project_data.id` because Perfex sometimes delivers Tasks with
-            // null root rel fields despite retaining a project_data nested object.
-            if (taskDoc?.rel_type) {
-                taskUpdatePayload.rel_type = taskDoc.rel_type;
-            } else if (taskDoc?.project_data?.id) {
-                taskUpdatePayload.rel_type = 'project';
-            }
+            // Relational fields — fallback to project_data if root fields are null
+            if (taskDoc?.rel_type) taskUpdatePayload.rel_type = taskDoc.rel_type;
+            else if (taskDoc?.project_data?.id) taskUpdatePayload.rel_type = 'project';
+            if (taskDoc?.rel_id) taskUpdatePayload.rel_id = taskDoc.rel_id;
+            else if (taskDoc?.project_data?.id) taskUpdatePayload.rel_id = taskDoc.project_data.id;
 
-            if (taskDoc?.rel_id) {
-                taskUpdatePayload.rel_id = taskDoc.rel_id;
-            } else if (taskDoc?.project_data?.id) {
-                taskUpdatePayload.rel_id = taskDoc.project_data.id;
-            }
+            // Preserve all other existing task fields so PUT doesn't wipe them
+            if (taskDoc?.name) taskUpdatePayload.name = taskDoc.name;
+            if (taskDoc?.startdate) taskUpdatePayload.startdate = taskDoc.startdate;
+            if (taskDoc?.duedate) taskUpdatePayload.duedate = taskDoc.duedate;
+            if (taskDoc?.priority) taskUpdatePayload.priority = taskDoc.priority;
+            if (taskDoc?.milestone) taskUpdatePayload.milestone = taskDoc.milestone;
+            if (taskDoc?.billable !== undefined && taskDoc.billable !== null) taskUpdatePayload.billable = taskDoc.billable;
+            if (taskDoc?.hourly_rate !== undefined) taskUpdatePayload.hourly_rate = taskDoc.hourly_rate;
+            if (taskDoc?.is_public !== undefined) taskUpdatePayload.is_public = taskDoc.is_public;
 
             const taskUpdateRes = await fetchPerfex(`/tasks/${task_id}`, {
                 method: 'PUT',
