@@ -395,6 +395,36 @@ export function TasksTab() {
                                         <span className="font-semibold text-emerald-700 dark:text-emerald-300">${Number(selectedTask.hourly_rate).toFixed(2)}/hr</span>
                                     </div>
                                 )}
+
+                                {/* Billable pill */}
+                                {selectedTask.billable !== undefined && selectedTask.billable !== null && (
+                                    <div className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm border ${selectedTask.billable === '1' || selectedTask.billable === 1
+                                        ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30'
+                                        : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'}`}>
+                                        <DollarSign className={`h-4 w-4 shrink-0 ${selectedTask.billable === '1' || selectedTask.billable === 1 ? 'text-emerald-600' : 'text-slate-400'}`} />
+                                        <span className={`font-semibold ${selectedTask.billable === '1' || selectedTask.billable === 1 ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500'}`}>
+                                            {selectedTask.billable === '1' || selectedTask.billable === 1 ? 'Billable' : 'Non-Billable'}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Milestone pill */}
+                                {(selectedTask.milestone_name || selectedTask.milestone) && (
+                                    <div className="flex items-center gap-2 bg-violet-50 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/30 rounded-xl px-4 py-2.5 text-sm">
+                                        <ListTodo className="h-4 w-4 text-violet-500 shrink-0" />
+                                        <span className="font-semibold text-violet-700 dark:text-violet-300">
+                                            {selectedTask.milestone_name || `Milestone #${selectedTask.milestone}`}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Start date pill */}
+                                {selectedTask.startdate && selectedTask.startdate !== '0000-00-00' && (
+                                    <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-sm">
+                                        <CalendarDays className="h-4 w-4 text-slate-400 shrink-0" />
+                                        <span className="text-slate-500 font-medium">Start: <span className="text-slate-700 dark:text-slate-200">{selectedTask.startdate.split(' ')[0]}</span></span>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Collapsible Instructions */}
