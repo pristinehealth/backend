@@ -5,6 +5,7 @@ import Timesheet from '@/models/Timesheet';
 import Staff from '@/models/Staff';
 import Customer from '@/models/Customer';
 import Project from '@/models/Project';
+import { buildChangedBulkOps } from '@/lib/syncDiff';
 
 export async function POST(request: Request) {
     try {
@@ -26,10 +27,11 @@ export async function POST(request: Request) {
         const syncResults: Record<string, any> = {};
 
         // Helper mapper to route string names to correct Mongoose Models and API endpoints
-        const resourceMap: Record<string, { model: any, endpoint: string, idKey: string }> = {
+        const resourceMap: Record<string, { model: any, endpoint: string, idKey: string, omitFields?: string[] }> = {
             'tasks': { model: Task, endpoint: 'tasks', idKey: 'id' },
             'timesheets': { model: Timesheet, endpoint: 'timesheets', idKey: 'id' },
-            'staff': { model: Staff, endpoint: 'staffs', idKey: 'staffid' },
+            // Drop Perfex's `password` (a credential hash) — never used, needless liability.
+            'staff': { model: Staff, endpoint: 'staffs', idKey: 'staffid', omitFields: ['password'] },
             'customers': { model: Customer, endpoint: 'customers', idKey: 'userid' },
             'projects': { model: Project, endpoint: 'projects', idKey: 'id' }
         };
@@ -46,7 +48,9 @@ export async function POST(request: Request) {
             const length = 50;
             let hasMore = true;
             let totalSynced = 0;
+            let unchanged = 0;
             const activeIds: any[] = [];
+            const items: Array<{ idValue: any; payload: Record<string, any> }> = [];
 
             try {
                 while (hasMore) {
@@ -74,7 +78,7 @@ export async function POST(request: Request) {
                         break;
                     }
 
-                    const bulkOps = chunk.map((item: any) => {
+                    for (const item of chunk) {
                         const idValue = item[config.idKey];
                         activeIds.push(idValue);
 
@@ -83,19 +87,10 @@ export async function POST(request: Request) {
                         if (resourceName === 'projects' && (!item.customfields || item.customfields.length === 0)) {
                             delete updatePayload.customfields;
                         }
+                        // Drop sensitive fields (e.g. Perfex staff password hash) before storing.
+                        for (const f of config.omitFields || []) delete updatePayload[f];
 
-                        return {
-                            updateOne: {
-                                filter: { [config.idKey]: idValue },
-                                update: { $set: updatePayload },
-                                upsert: true
-                            }
-                        };
-                    });
-
-                    if (bulkOps.length > 0) {
-                        await config.model.bulkWrite(bulkOps);
-                        totalSynced += bulkOps.length;
+                        items.push({ idValue, payload: updatePayload });
                     }
 
                     if (chunk.length < length) {
@@ -105,7 +100,30 @@ export async function POST(request: Request) {
                     }
                 }
 
-                // Delete local orphans
+                // Diff against stored docs — write only new/changed records so an
+                // unchanged sync does zero writes (see syncDiff).
+                if (items.length > 0) {
+                    const existingDocs = await config.model
+                        .find({ [config.idKey]: { $in: activeIds } })
+                        .lean();
+                    const existingMap = new Map<string, any>(
+                        (existingDocs as any[]).map((d) => [String(d[config.idKey]), d])
+                    );
+                    const { ops, unchanged: skipped } = buildChangedBulkOps(items, existingMap, config.idKey);
+                    unchanged = skipped;
+                    if (ops.length > 0) {
+                        await config.model.bulkWrite(ops);
+                        totalSynced += ops.length;
+                    }
+                    if (skipped > 0) {
+                        console.log(`[Scoped Sync] ${config.endpoint}: ${skipped}/${items.length} unchanged — skipped writes.`);
+                    }
+                }
+
+                // Delete local orphans. Note: a failed page fetch above throws,
+                // which jumps to the catch below BEFORE reaching this delete, so
+                // orphan pruning is skipped on fetch errors. Keep this block
+                // inside the try so that protection is preserved.
                 let deletedCount = 0;
                 if (activeIds.length > 0) {
                     const deleteResult = await config.model.deleteMany({ [config.idKey]: { $nin: activeIds } });
@@ -115,6 +133,8 @@ export async function POST(request: Request) {
                 syncResults[resourceName] = {
                     synced: true,
                     totalActive: activeIds.length,
+                    written: totalSynced,
+                    unchanged,
                     deleted: deletedCount
                 };
 

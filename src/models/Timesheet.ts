@@ -24,7 +24,8 @@ const TimesheetSchema = new mongoose.Schema<TimesheetDocument>(
         hourly_rate: { type: String },
         note: { type: String, default: null },
     },
-    { timestamps: true }
+    // strict:false so every field Perfex sends is persisted, not silently dropped.
+    { timestamps: true, strict: false }
 );
 
 export default mongoose.models.Timesheet || mongoose.model<TimesheetDocument>('Timesheet', TimesheetSchema);

@@ -57,7 +57,9 @@ const TaskSchema = new mongoose.Schema<TaskDocument>(
         rel_type: { type: String },
         rel_id: { type: String }
     },
-    { timestamps: true }
+    // strict:false so every field Perfex sends is persisted, not silently dropped
+    // for lacking a schema path (e.g. addedfrom, datefinished, repeat_every).
+    { timestamps: true, strict: false }
 );
 
 export default mongoose.models.Task || mongoose.model<TaskDocument>('Task', TaskSchema);

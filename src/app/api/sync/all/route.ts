@@ -5,6 +5,9 @@ import Customer from '@/models/Customer';
 import Project from '@/models/Project';
 import Task from '@/models/Task';
 import Timesheet from '@/models/Timesheet';
+import { reconcileEmailKeyedCompliance, archiveTerminatedStaff } from '@/lib/documentHelpers';
+import { refreshStaffComplianceStatus } from '@/lib/compliance';
+import { buildChangedBulkOps } from '@/lib/syncDiff';
 
 const PAGE_SIZE = 50;
 
@@ -14,10 +17,14 @@ interface ResourceConfig {
     idKey: string;
     /** If true, skip overwriting customfields when Perfex returns an empty array */
     preserveCustomfields?: boolean;
+    /** Sensitive fields to drop from the Perfex payload before storing */
+    omitFields?: string[];
 }
 
 const RESOURCE_MAP: Record<string, ResourceConfig> = {
-    staffs: { model: Staff, endpoint: 'staffs', idKey: 'staffid' },
+    // Drop Perfex's `password` (a credential hash) — the app never uses it and
+    // storing it is a needless liability.
+    staffs: { model: Staff, endpoint: 'staffs', idKey: 'staffid', omitFields: ['password'] },
     customers: { model: Customer, endpoint: 'customers', idKey: 'userid' },
     projects: { model: Project, endpoint: 'projects', idKey: 'id', preserveCustomfields: true },
     tasks: { model: Task, endpoint: 'tasks', idKey: 'id' },
@@ -38,7 +45,7 @@ async function syncResource(
     let start = 0;
     let hasMore = true;
     const activeIds: any[] = [];
-    const allBulkOps: any[] = [];
+    const items: Array<{ idValue: any; payload: Record<string, any> }> = [];
     let fetchError = false;
 
     // ── Phase 1: fetch all pages ───────────────────────────────────────────
@@ -71,14 +78,10 @@ async function syncResource(
                 if (config.preserveCustomfields && (!item.customfields || item.customfields.length === 0)) {
                     delete payload.customfields;
                 }
+                // Drop sensitive fields (e.g. Perfex staff password hash) before storing.
+                for (const f of config.omitFields || []) delete payload[f];
 
-                allBulkOps.push({
-                    updateOne: {
-                        filter: { [config.idKey]: idValue },
-                        update: { $set: payload },
-                        upsert: true
-                    }
-                });
+                items.push({ idValue, payload });
             }
 
             hasMore = chunk.length === PAGE_SIZE;
@@ -91,18 +94,44 @@ async function syncResource(
         }
     }
 
-    if (allBulkOps.length === 0) {
+    if (items.length === 0) {
         return { synced: false, message: fetchError ? 'Fetch failed' : 'No data from Perfex' };
     }
 
-    // ── Phase 2: bulk upsert ───────────────────────────────────────────────
-    const writeResult = await config.model.bulkWrite(allBulkOps);
+    // ── Phase 2: diff against stored docs, write ONLY what changed ──────────
+    // Perfex returns identical data most syncs; blindly $set-ing every record
+    // (plus Mongoose's auto updatedAt) would rewrite every doc every run. Load
+    // the current docs once and emit a write only for new or genuinely-changed
+    // records — so an unchanged sync does zero writes.
+    const existingDocs = await config.model
+        .find({ [config.idKey]: { $in: activeIds } })
+        .lean();
+    const existingMap = new Map<string, any>(
+        (existingDocs as any[]).map((d) => [String(d[config.idKey]), d])
+    );
+
+    const { ops: allBulkOps, unchanged, changedByField } = buildChangedBulkOps(items, existingMap, config.idKey);
+
+    const writeResult = allBulkOps.length
+        ? await config.model.bulkWrite(allBulkOps)
+        : { matchedCount: 0, upsertedCount: 0, modifiedCount: 0 };
+
+    console.log(
+        `[Sync/All] ${config.endpoint}: ${unchanged}/${items.length} unchanged, ${allBulkOps.length} written.`,
+        Object.keys(changedByField).length ? `changed-by-field: ${JSON.stringify(changedByField)}` : ''
+    );
 
     // ── Phase 3: orphan pruning — ONLY if fetch completed without errors ──
     // If any page failed we have an incomplete activeIds list; deleting
     // based on it would incorrectly remove records that still exist in Perfex.
     let deletedCount = 0;
     if (!fetchError && activeIds.length > 0) {
+        // For staff, archive the terminated members' compliance data (retention
+        // clock) BEFORE pruning their Staff row — never silently orphan it.
+        if (config.idKey === 'staffid') {
+            const removed = await config.model.find({ staffid: { $nin: activeIds } }).select('staffid').lean();
+            await archiveTerminatedStaff(removed.map((s: any) => String(s.staffid)));
+        }
         const del = await config.model.deleteMany({ [config.idKey]: { $nin: activeIds } });
         deletedCount = del.deletedCount;
         if (deletedCount > 0) {
@@ -118,6 +147,7 @@ async function syncResource(
         matched: writeResult.matchedCount,
         upserted: writeResult.upsertedCount,
         modified: writeResult.modifiedCount,
+        unchanged,
         deleted: deletedCount,
         partialFetch: fetchError,
     };
@@ -149,10 +179,29 @@ export async function POST(request: Request) {
             }
         }
 
+        // Heal any accept-before-sync compliance data now that staff rows exist.
+        let reconcile = null;
+        try {
+            reconcile = await reconcileEmailKeyedCompliance();
+        } catch (err: any) {
+            console.error('[Sync/All] Compliance reconcile failed:', err?.message || err);
+        }
+
+        // Refresh the denormalized compliance sort keys on every staff — keeps the
+        // "issues first" ordering fresh (incl. expiry drift + targeting changes) and
+        // backfills any staff added by this sync.
+        try {
+            const refreshed = await refreshStaffComplianceStatus();
+            console.log(`[Sync/All] Refreshed compliance sort keys for ${refreshed} staff.`);
+        } catch (err: any) {
+            console.error('[Sync/All] Compliance status refresh failed:', err?.message || err);
+        }
+
         return NextResponse.json({
             success: true,
             message: 'Synchronization process completed.',
-            results: syncResults
+            results: syncResults,
+            reconcile
         });
 
     } catch (error: any) {

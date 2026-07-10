@@ -1,369 +1,561 @@
 "use client";
 
-import { useSession, signOut } from "next-auth/react";
-import { useState, useEffect } from "react";
-import { LogOut, Users, UsersRound, Building2, ClipboardList, RefreshCw, Menu, X, Play, Square, Clock } from "lucide-react";
-import { cn } from "@/lib/utils";
+import Link from "next/link";
+import {
+    LogIn, ArrowRight, ShieldCheck, MapPin, Building2, Home, Award, CheckCircle2,
+    Moon, Sun, Users, Phone, Mail, Stethoscope, Clock, HeartPulse, Sparkles,
+    Smartphone, FileCheck, Fingerprint, ClipboardCheck, BadgeCheck, CalendarClock,
+    FileSignature, Handshake, Utensils, Car, UserRound, Activity, Eye, ScanLine,
+    Bed, Brain, Accessibility, Send, Loader2,
+} from "lucide-react";
+import { useState, useEffect, useRef } from "react";
 
-import { StaffTab } from "./tabs/StaffTab";
-import { CustomersTab } from "./tabs/CustomersTab";
-import { ContactsTab } from "./tabs/ContactsTab";
-import { TasksTab } from "./tabs/TasksTab";
-import { ProjectsTab } from "./tabs/ProjectsTab";
+/** Fade-and-rise a block into view the first time it scrolls onscreen. */
+function Reveal({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
+    const ref = useRef<HTMLDivElement>(null);
+    const [shown, setShown] = useState(false);
+    useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        const io = new IntersectionObserver(
+            ([e]) => { if (e.isIntersecting) { setShown(true); io.disconnect(); } },
+            { threshold: 0.12 }
+        );
+        io.observe(el);
+        return () => io.disconnect();
+    }, []);
+    return (
+        <div
+            ref={ref}
+            style={{ transitionDelay: `${delay}ms` }}
+            className={`transition-all duration-700 ease-out ${shown ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"} ${className}`}
+        >
+            {children}
+        </div>
+    );
+}
 
-type TabOption = "staff" | "customers" | "contacts" | "tasks" | "projects";
+/** Small uppercase section eyebrow. */
+function Eyebrow({ children, accent = "primary" }: { children: React.ReactNode; accent?: "primary" | "accent" }) {
+    return (
+        <span className={`text-xs font-black uppercase tracking-[0.2em] ${accent === "primary" ? "text-brand-primary" : "text-brand-accent"}`}>
+            {children}
+        </span>
+    );
+}
 
-export default function Dashboard() {
-  const { data: session, status } = useSession();
-  const [activeTab, setActiveTab] = useState<TabOption>("staff");
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
+export default function LandingPage() {
+    const [theme, setTheme] = useState<"light" | "dark">("dark");
+    const [scrollY, setScrollY] = useState(0);
+    const [contact, setContact] = useState({ name: "", email: "", phone: "", inquiryType: "Facility Staffing", message: "", company: "" });
+    const [contactStatus, setContactStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+    const [contactError, setContactError] = useState("");
 
-  const [cronStatus, setCronStatus] = useState<{ isActive: boolean; currentMode?: string; scheduledHour?: number; intervalMinutes?: number } | null>(null);
-  const [isTogglingCron, setIsTogglingCron] = useState(false);
-  const [syncMode, setSyncMode] = useState<'daily' | 'interval'>('daily');
-  const [syncHour, setSyncHour] = useState<number>(2);
-  // intervalInput is the raw string the user types (avoids parseInt||1 killing backspace)
-  const [intervalInput, setIntervalInput] = useState<string>('60');
-  const [intervalUnit, setIntervalUnit] = useState<'mins' | 'hrs'>('mins');
-  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+    useEffect(() => {
+        setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+        const onScroll = () => setScrollY(window.scrollY);
+        window.addEventListener("scroll", onScroll, { passive: true });
+        return () => window.removeEventListener("scroll", onScroll);
+    }, []);
 
-  // Fetch initial cron status on mount
-  useEffect(() => {
-    fetch('/api/cron')
-      .then(res => res.json())
-      .then(data => {
-        setCronStatus(data);
-        if (data.currentMode) setSyncMode(data.currentMode);
-        if (data.scheduledHour !== undefined) setSyncHour(data.scheduledHour);
-        if (data.intervalMinutes !== undefined) {
-          // Convert stored minutes to the display unit value
-          const isHrs = data.intervalMinutes % 60 === 0 && data.intervalMinutes >= 60;
-          const unit = isHrs ? 'hrs' : 'mins';
-          const displayVal = isHrs ? data.intervalMinutes / 60 : data.intervalMinutes;
-          setIntervalUnit(unit);
-          setIntervalInput(String(displayVal));
+    const toggleTheme = () => {
+        const next = theme === "dark" ? "light" : "dark";
+        setTheme(next);
+        localStorage.theme = next;
+        document.documentElement.classList.toggle("dark", next === "dark");
+    };
+
+    // Pre-fill the contact form's inquiry type when a CTA funnels here.
+    const requestType = (type: string) => setContact((c) => ({ ...c, inquiryType: type }));
+
+    const submitContact = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setContactStatus("sending");
+        setContactError("");
+        try {
+            const res = await fetch("/api/contact", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(contact),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                setContactError(data.error || "Something went wrong. Please try again.");
+                setContactStatus("error");
+                return;
+            }
+            setContactStatus("sent");
+            setContact({ name: "", email: "", phone: "", inquiryType: "Facility Staffing", message: "", company: "" });
+        } catch {
+            setContactError("Network error. Please check your connection and try again.");
+            setContactStatus("error");
         }
-      })
-      .catch(err => console.error("Failed to fetch cron status:", err));
-  }, []);
+    };
 
-  // Helper: compute final minutes from the string input + unit
-  const computeIntervalMinutes = () => {
-    const val = Math.max(1, parseInt(intervalInput, 10) || 1);
-    return intervalUnit === 'hrs' ? val * 60 : val;
-  };
+    // ── Section data ──────────────────────────────────────────────────────────
+    const facilitySettings = [
+        { name: "Assisted Living", icon: Building2 },
+        { name: "Long-Term Care", icon: HeartPulse },
+        { name: "Memory Care", icon: Brain },
+        { name: "Rehabilitation", icon: Activity },
+        { name: "Nursing Homes", icon: Stethoscope },
+        { name: "Retirement Communities", icon: Home },
+        { name: "Adult Family Homes", icon: Users },
+    ];
+    const professionals = ["CNAs", "HCAs", "LPNs", "RNs", "Medical Assistants", "Medical Technicians", "1:1 Sitters"];
+    const coverageModes = ["Short-notice coverage", "Temporary assignments", "Ongoing support", "Day · Evening · Night shifts"];
 
-  // Switch unit while preserving the effective duration
-  const handleUnitSwitch = (newUnit: 'mins' | 'hrs') => {
-    if (newUnit === intervalUnit) return;
-    const currentMins = computeIntervalMinutes();
-    if (newUnit === 'hrs') {
-      setIntervalInput(String(Math.round(currentMins / 60) || 1));
-    } else {
-      setIntervalInput(String(currentMins));
-    }
-    setIntervalUnit(newUnit);
-  };
+    const inHomeServices = [
+        { name: "Personal Care", icon: HeartPulse },
+        { name: "Activities of Daily Living", icon: ClipboardCheck },
+        { name: "Companionship", icon: Handshake },
+        { name: "Mobility Support", icon: Accessibility },
+        { name: "Fall-Risk Monitoring", icon: Eye },
+        { name: "Meal Support", icon: Utensils },
+        { name: "Respite Care", icon: Bed },
+        { name: "Transportation Support", icon: Car },
+        { name: "1:1 Care", icon: UserRound },
+    ];
 
-  // Shared save-schedule logic used by both "Save Schedule" button and Start Auto-Sync
-  const saveSchedule = async () => {
-    const intervalMinutes = computeIntervalMinutes();
-    const body: any = { action: 'reschedule', mode: syncMode };
-    if (syncMode === 'daily') body.hour = syncHour;
-    else body.intervalMinutes = intervalMinutes;
-    const res = await fetch('/api/cron', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to save schedule.');
-    setCronStatus(prev => prev ? { ...prev, currentMode: syncMode, scheduledHour: syncHour, intervalMinutes } : prev);
-    return data;
-  };
+    const qualitySteps = [
+        { name: "License Verification", icon: BadgeCheck },
+        { name: "Certification Review", icon: FileCheck },
+        { name: "Background Screening", icon: Fingerprint },
+        { name: "Experience Validation", icon: ClipboardCheck },
+        { name: "References", icon: Users },
+        { name: "Skills Assessment", icon: ScanLine },
+        { name: "First Aid / CPR / BLS", icon: HeartPulse },
+        { name: "Health Documentation", icon: FileSignature },
+        { name: "Ongoing Credential Monitoring", icon: ShieldCheck },
+    ];
 
-  const handleToggleCron = async () => {
-    if (!cronStatus) return;
-    setIsTogglingCron(true);
-    try {
-      if (!cronStatus.isActive) {
-        // Save current schedule to DB first so the cron arms with what the UI shows
-        await saveSchedule();
-      }
-      const action = cronStatus.isActive ? 'stop' : 'start';
-      const res = await fetch('/api/cron', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setCronStatus(prev => prev ? { ...prev, isActive: data.isActive } : { isActive: data.isActive });
-      } else {
-        alert(data.error || 'Failed to toggle cron status.');
-      }
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || 'Error communicating with cron API.');
-    } finally {
-      setIsTogglingCron(false);
-    }
-  };
+    const techCapabilities = [
+        { name: "Mobile Scheduling", icon: Smartphone },
+        { name: "CRM Workflows", icon: ClipboardCheck },
+        { name: "EVV Geolocation", icon: MapPin },
+        { name: "Electronic Timekeeping", icon: CalendarClock },
+        { name: "Client & Facility Sign-Offs", icon: FileSignature },
+        { name: "Credential Tracking", icon: BadgeCheck },
+        { name: "Compliance Monitoring", icon: ShieldCheck },
+        { name: "Electronic Documentation", icon: FileCheck },
+    ];
 
-  const handleGlobalSync = async () => {
-    setIsSyncing(true);
-    try {
-      const response = await fetch('/api/sync/all', { method: 'POST' });
-      const data = await response.json();
-      if (response.ok) {
-        alert('Global sync completed! Check console for detailed results.');
-        console.log('Global Sync Results:', data.results);
-      } else {
-        alert(`Global sync failed: ${data.error}`);
-      }
-    } catch (error) {
-      console.error('Failed to run global sync:', error);
-      alert('Failed to run global sync. Check console for details.');
-    } finally {
-      setIsSyncing(false);
-    }
-  };
+    const STAFFING = "/login?callbackUrl=/dashboard";
 
-  if (status === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-blue"></div>
-      </div>
-    );
-  }
+        <div className="min-h-screen bg-background text-foreground font-sans text-base overflow-x-hidden">
 
-  if (status === "unauthenticated") {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-4">Access Denied</h2>
-        <a href="/login" className="bg-brand-blue text-white px-6 py-2 rounded-xl font-bold">Go to Login</a>
-      </div>
-    );
-  }
-
-  const tabs = [
-    { id: "staff", label: "Staff", icon: Users },
-    { id: "customers", label: "Customers", icon: Building2 },
-    { id: "contacts", label: "Contacts", icon: UsersRound },
-    { id: "projects", label: "Projects", icon: ClipboardList },
-    { id: "tasks", label: "Tasks", icon: ClipboardList },
-  ] as const;
-
-  const SidebarContent = () => (
-    <>
-      <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-center">
-        <img src="/logo.png" alt="Pristine Health" className="h-16 w-auto" />
-      </div>
-
-      <div className="p-4 flex-1 space-y-1 overflow-y-auto">
-        <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-2 px-2">Navigation</div>
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => { setActiveTab(tab.id as TabOption); setMobileMenuOpen(false); }}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium text-sm transition-all",
-                activeTab === tab.id
-                  ? "bg-brand-blue-muted dark:bg-brand-blue-light/10 text-brand-blue dark:text-brand-blue-light border-l-2 border-brand-orange"
-                  : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 border-l-2 border-transparent"
-              )}
-            >
-              <Icon className={cn("h-5 w-5", activeTab === tab.id ? "text-brand-orange" : "text-slate-400")} />
-              {tab.label}
-            </button>
-          );
-        })}
-
-        <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-8 px-2 flex justify-between items-center">
-          Options & Actions
-          {cronStatus !== null && (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800">
-              <div className={`w-2 h-2 rounded-full ${cronStatus.isActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></div>
-              <span className="text-[10px] uppercase font-bold text-slate-500">Auto</span>
-            </div>
-          )}
-        </div>
-
-        <button
-          onClick={handleToggleCron}
-          disabled={isTogglingCron || cronStatus === null}
-          className={cn(
-            "w-full flex items-center justify-start gap-3 px-3 py-2 rounded-lg font-medium text-sm transition-all text-slate-600 dark:text-slate-400 disabled:opacity-50 disabled:cursor-not-allowed",
-            cronStatus?.isActive
-              ? "hover:bg-amber-50 dark:hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-400"
-              : "hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400"
-          )}
-        >
-          {cronStatus?.isActive ? <Square className="h-5 w-5" /> : <Play className="h-5 w-5" />}
-          {cronStatus?.isActive ? 'Stop Auto-Sync' : 'Start Auto-Sync'}
-        </button>
-
-        {/* Sync Schedule Widget */}
-        <div className="mt-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
-          <div className="flex items-center gap-2 mb-2">
-            <Clock className="h-4 w-4 text-slate-400" />
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Sync Schedule</span>
-          </div>
-
-          {/* Mode Toggle */}
-          <div className="flex rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 mb-2 text-xs font-semibold">
-            {(['daily', 'interval'] as const).map(m => (
-              <button
-                key={m}
-                onClick={() => setSyncMode(m)}
-                className={cn(
-                  "flex-1 py-1 capitalize transition-colors",
-                  syncMode === m
-                    ? "bg-brand-blue text-white"
-                    : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-                )}
-              >{m}</button>
-            ))}
-          </div>
-
-          {syncMode === 'daily' ? (
-            <select
-              value={syncHour}
-              onChange={e => setSyncHour(parseInt(e.target.value, 10))}
-              className="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-blue mb-2"
-            >
-              {Array.from({ length: 24 }, (_, h) => (
-                <option key={h} value={h}>
-                  {String(h).padStart(2, '0')}:00 — {h === 0 ? 'Midnight' : h < 12 ? `${h} AM` : h === 12 ? 'Noon' : `${h - 12} PM`}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <div className="mb-2">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={intervalInput}
-                  onChange={e => {
-                    // Allow free typing — don't force minimum until save
-                    const v = e.target.value.replace(/[^0-9]/g, '');
-                    setIntervalInput(v);
-                  }}
-                  onBlur={() => {
-                    // Clamp to minimum of 1 on blur
-                    const v = Math.max(1, parseInt(intervalInput, 10) || 1);
-                    setIntervalInput(String(v));
-                  }}
-                  className="w-20 text-sm border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-blue"
-                />
-                {/* Unit toggle: mins / hrs */}
-                <div className="flex rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 text-xs font-semibold">
-                  {(['mins', 'hrs'] as const).map(u => (
-                    <button
-                      key={u}
-                      onClick={() => handleUnitSwitch(u)}
-                      className={cn(
-                        "px-2 py-1 transition-colors",
-                        intervalUnit === u
-                          ? "bg-brand-blue text-white"
-                          : "bg-white dark:bg-slate-900 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-                      )}
-                    >{u}</button>
-                  ))}
+            {/* Top contact bar */}
+            <div className="bg-zinc-950 text-zinc-300 text-xs py-2 px-4 border-b border-white/5 relative z-50">
+                <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
+                    <div className="flex items-center gap-4">
+                        <span className="flex items-center gap-1"><Phone className="h-3 w-3 text-brand-primary" /> (206) 571-6983</span>
+                        <span className="flex items-center gap-1"><Mail className="h-3 w-3 text-brand-primary" /> support@pristinehealth.com</span>
+                    </div>
+                    <span className="hidden sm:block">Seattle WA, 98103-4029</span>
                 </div>
-              </div>
-              <p className="text-[10px] text-slate-400 mt-1">
-                Fires every {intervalInput || '?'} {intervalUnit}
-                {intervalUnit === 'hrs'
-                  ? ` (${(parseInt(intervalInput, 10) || 0) * 60} mins)`
-                  : (parseInt(intervalInput, 10) || 0) >= 60
-                    ? ` (${((parseInt(intervalInput, 10) || 0) / 60).toFixed(1)}h)`
-                    : ''}
-              </p>
             </div>
-          )}
 
-          <button
-            onClick={async () => {
-              setIsSavingSchedule(true);
-              try {
-                await saveSchedule();
-              } catch (err: any) {
-                alert(err.message || 'Failed to reschedule.');
-              } finally {
-                setIsSavingSchedule(false);
-              }
-            }}
-            disabled={isSavingSchedule}
-            className="w-full py-1.5 rounded-md text-xs font-bold bg-brand-blue text-white hover:bg-brand-blue/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {isSavingSchedule ? 'Saving...' : 'Save Schedule'}
-          </button>
+            {/* Nav */}
+            <header className="border-b border-sidebar-border bg-sidebar-bg/80 backdrop-blur-xl sticky top-0 z-50">
+                <div className="max-w-6xl mx-auto px-4 py-3.5 flex items-center justify-between">
+                    <Link href="/" className="flex items-center gap-2">
+                        <img src="/logo.png" alt="Pristine Health" className="h-10 w-auto brightness-110 dark:brightness-100" />
+                    </Link>
+                    <nav className="hidden md:flex items-center gap-7 text-sm font-semibold">
+                        <a href="#workforce" className="hover:text-brand-primary transition-colors">Facility Staffing</a>
+                        <a href="#in-home" className="hover:text-brand-primary transition-colors">In-Home Care</a>
+                        <a href="#quality" className="hover:text-brand-primary transition-colors">Quality</a>
+                        <a href="#technology" className="hover:text-brand-primary transition-colors">Technology</a>
+                        <a href="#contact" className="hover:text-brand-primary transition-colors">Contact</a>
+                        <Link href="/jobs" className="hover:text-brand-primary transition-colors">Open Positions</Link>
+                    </nav>
+                    <div className="flex items-center gap-3">
+                        <button onClick={toggleTheme} className="p-2 rounded-xl text-slate-500 hover:bg-slate-200/50 dark:hover:bg-white/[0.05] transition-all" title="Toggle theme">
+                            {theme === "dark" ? <Sun className="h-5 w-5 text-amber-500" /> : <Moon className="h-5 w-5 text-indigo-500" />}
+                        </button>
+                        <Link href={STAFFING} className="bg-brand-accent hover:bg-brand-accent-dark text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-brand-accent/20 flex items-center gap-1.5 active:scale-95">
+                            <LogIn className="h-4 w-4" /> Portal Login
+                        </Link>
+                    </div>
+                </div>
+            </header>
+
+            {/* 1 ── HERO ──────────────────────────────────────────────────────── */}
+            <section className="relative min-h-[640px] flex items-center overflow-hidden bg-zinc-950">
+                {/* Parallax image + scrims */}
+                <div
+                    className="absolute inset-0 bg-cover bg-center opacity-45 will-change-transform"
+                    style={{ backgroundImage: "url('/healthcare_professionals_diversity.png')", transform: `translateY(${scrollY * 0.3}px) scale(1.15)` }}
+                />
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_40%,rgba(0,0,0,0.25),rgba(9,9,11,0.92))]" />
+                <div className="absolute -top-24 right-[12%] w-[28rem] h-[28rem] bg-brand-primary/20 rounded-full blur-[150px] animate-float-slow" />
+                <div className="absolute bottom-[-6rem] left-[8%] w-[24rem] h-[24rem] bg-brand-accent/20 rounded-full blur-[150px] animate-float-medium" />
+
+                <div className="relative z-10 max-w-6xl mx-auto px-4 py-20 w-full text-white">
+                    <div className="max-w-3xl space-y-6 animate-fade-up">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-brand-primary/90 text-white text-xs font-bold uppercase tracking-wider backdrop-blur">
+                            <Award className="h-3.5 w-3.5" /> Staffing Needs Fulfillment
+                        </span>
+                        <h1 className="text-4xl md:text-6xl font-black leading-[1.05] tracking-tight">
+                            Healthcare Talent.<br />
+                            <span className="bg-gradient-to-r from-brand-primary via-brand-primary-light to-brand-accent-light bg-clip-text text-transparent">In-Home Care.</span><br />
+                            One Trusted Partner.
+                        </h1>
+                        <p className="text-base md:text-lg text-zinc-300 leading-relaxed max-w-2xl">
+                            Pristine Health helps healthcare organizations and individuals access qualified professionals, flexible coverage, and personalized care through a responsive, technology-enabled platform. From urgent staffing needs to ongoing workforce support and in-home care, we make it easier to connect the right people with the right care environment.
+                        </p>
+                        <p className="text-sm md:text-base font-bold text-brand-primary-light tracking-wide">
+                            Better access. Smarter coordination. Reliable support.
+                        </p>
+                        <div className="flex flex-wrap gap-4 pt-2">
+                            <a href="#contact" onClick={() => requestType("Facility Staffing")} className="bg-brand-primary hover:bg-brand-primary-dark text-white font-bold px-7 py-3.5 rounded-xl shadow-lg shadow-brand-primary/30 flex items-center gap-2 active:scale-95 transition-all">
+                                Request Staffing <ArrowRight className="h-5 w-5" />
+                            </a>
+                            <a href="#in-home" className="bg-white/10 hover:bg-white/20 border border-white/25 text-white font-bold px-7 py-3.5 rounded-xl backdrop-blur flex items-center gap-2 active:scale-95 transition-all">
+                                <Home className="h-5 w-5" /> Explore In-Home Care
+                            </a>
+                        </div>
+                        <div className="flex flex-wrap gap-x-8 gap-y-3 pt-6 text-sm text-zinc-300">
+                            <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-brand-primary" /> Credentialed & compliant</span>
+                            <span className="flex items-center gap-2"><Clock className="h-4 w-4 text-brand-primary" /> Short-notice coverage</span>
+                            <span className="flex items-center gap-2"><MapPin className="h-4 w-4 text-brand-primary" /> Washington State</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* 2 ── WORKFORCE SOLUTIONS ───────────────────────────────────────── */}
+            <section id="workforce" className="relative max-w-6xl mx-auto px-4 py-24">
+                <Reveal className="max-w-2xl space-y-3">
+                    <Eyebrow>Workforce Solutions</Eyebrow>
+                    <h2 className="text-3xl md:text-4xl font-black text-text-primary tracking-tight">Built for the way healthcare works today</h2>
+                    <p className="text-text-secondary leading-relaxed">
+                        Staffing needs change quickly. Pristine Health helps organizations stay ready with flexible workforce solutions across a wide range of care settings.
+                    </p>
+                </Reveal>
+
+                <div className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {facilitySettings.map((s, i) => {
+                        const Icon = s.icon;
+                        return (
+                            <Reveal key={s.name} delay={i * 50}>
+                                <div className="crm-panel rounded-2xl p-5 h-full hover:-translate-y-1 hover:border-brand-primary/40 transition-all duration-300 group">
+                                    <div className="p-2.5 bg-brand-primary-muted rounded-xl inline-flex border border-brand-primary/10 group-hover:scale-110 transition-transform">
+                                        <Icon className="h-5 w-5 text-brand-primary" />
+                                    </div>
+                                    <h3 className="mt-3 text-sm font-bold text-text-primary">{s.name}</h3>
+                                </div>
+                            </Reveal>
+                        );
+                    })}
+                </div>
+
+                <Reveal className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6" delay={100}>
+                    <div className="ui-card-soft rounded-2xl p-6">
+                        <h4 className="text-xs font-black uppercase tracking-wider text-text-primary flex items-center gap-2"><Users className="h-4 w-4 text-brand-accent" /> Professionals we support</h4>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            {professionals.map((p) => (
+                                <span key={p} className="px-3 py-1.5 rounded-full text-xs font-bold bg-brand-accent-muted text-brand-accent border border-brand-accent/15">{p}</span>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="ui-card-soft rounded-2xl p-6">
+                        <h4 className="text-xs font-black uppercase tracking-wider text-text-primary flex items-center gap-2"><Clock className="h-4 w-4 text-brand-primary" /> How we cover</h4>
+                        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {coverageModes.map((c) => (
+                                <span key={c} className="flex items-center gap-2 text-sm text-text-secondary"><CheckCircle2 className="h-4 w-4 text-brand-primary shrink-0" /> {c}</span>
+                            ))}
+                        </div>
+                    </div>
+                </Reveal>
+
+                <Reveal className="mt-8" delay={150}>
+                    <a href="#contact" onClick={() => requestType("Facility Staffing")} className="inline-flex items-center gap-2 bg-brand-primary hover:bg-brand-primary-dark text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-brand-primary/20 active:scale-95 transition-all">
+                        Find Staffing Solutions <ArrowRight className="h-4 w-4" />
+                    </a>
+                </Reveal>
+            </section>
+
+            {/* 3 ── IN-HOME CARE ──────────────────────────────────────────────── */}
+            <section id="in-home" className="relative border-y border-sidebar-border bg-slate-100/60 dark:bg-white/[0.015] py-24">
+                <div className="max-w-6xl mx-auto px-4">
+                    <Reveal className="max-w-2xl space-y-3">
+                        <Eyebrow accent="accent">In-Home Care</Eyebrow>
+                        <h2 className="text-3xl md:text-4xl font-black text-text-primary tracking-tight">Personalized care. Wherever home is.</h2>
+                        <p className="text-text-secondary leading-relaxed">
+                            Pristine Health provides individualized support designed around each person's needs, routines, and goals.
+                        </p>
+                    </Reveal>
+
+                    <div className="mt-10 grid grid-cols-2 md:grid-cols-3 gap-4">
+                        {inHomeServices.map((s, i) => {
+                            const Icon = s.icon;
+                            return (
+                                <Reveal key={s.name} delay={i * 40}>
+                                    <div className="ui-card rounded-2xl p-5 h-full flex items-center gap-3 hover:border-brand-accent/40 hover:-translate-y-0.5 transition-all duration-300 group">
+                                        <div className="p-2.5 bg-brand-accent-muted rounded-xl border border-brand-accent/10 group-hover:scale-110 transition-transform shrink-0">
+                                            <Icon className="h-5 w-5 text-brand-accent" />
+                                        </div>
+                                        <h3 className="text-sm font-bold text-text-primary">{s.name}</h3>
+                                    </div>
+                                </Reveal>
+                            );
+                        })}
+                    </div>
+
+                    <Reveal className="mt-8 flex flex-col sm:flex-row sm:items-center gap-5 justify-between ui-card-soft rounded-2xl p-6" delay={120}>
+                        <p className="text-sm text-text-secondary leading-relaxed max-w-2xl">
+                            We also support individuals living in apartments within retirement, assisted living, long-term care, memory care, rehabilitation, and nursing environments.
+                        </p>
+                        <a href="#contact" onClick={() => requestType("In-Home Care")} className="shrink-0 inline-flex items-center gap-2 bg-brand-accent hover:bg-brand-accent-dark text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-brand-accent/20 active:scale-95 transition-all">
+                            Explore Care Options <ArrowRight className="h-4 w-4" />
+                        </a>
+                    </Reveal>
+                </div>
+            </section>
+
+            {/* 4 ── QUALITY AT EVERY STEP ─────────────────────────────────────── */}
+            <section id="quality" className="relative max-w-6xl mx-auto px-4 py-24">
+                <Reveal className="max-w-2xl space-y-3">
+                    <Eyebrow>Quality at Every Step</Eyebrow>
+                    <h2 className="text-3xl md:text-4xl font-black text-text-primary tracking-tight">Qualified professionals. Thoughtfully selected.</h2>
+                    <p className="text-text-secondary leading-relaxed">
+                        We combine human judgment with structured screening and credentialing to identify professionals who are ready to contribute.
+                    </p>
+                </Reveal>
+
+                <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {qualitySteps.map((s, i) => {
+                        const Icon = s.icon;
+                        return (
+                            <Reveal key={s.name} delay={i * 40}>
+                                <div className="crm-panel rounded-2xl p-5 h-full flex items-start gap-3 relative overflow-hidden group hover:border-brand-primary/40 transition-all duration-300">
+                                    <div className="absolute top-0 left-0 h-1 w-full bg-brand-primary/20 group-hover:bg-brand-primary transition-colors" />
+                                    <div className="p-2.5 bg-brand-primary-muted rounded-xl border border-brand-primary/10 shrink-0">
+                                        <Icon className="h-5 w-5 text-brand-primary" />
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] font-mono font-bold text-text-muted">{String(i + 1).padStart(2, "0")}</span>
+                                        <h3 className="text-sm font-bold text-text-primary">{s.name}</h3>
+                                    </div>
+                                </div>
+                            </Reveal>
+                        );
+                    })}
+                </div>
+
+                <Reveal className="mt-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-brand-primary/20 bg-brand-primary-muted p-6" delay={120}>
+                    <p className="text-sm md:text-base font-semibold text-text-primary max-w-2xl">
+                        The result: professionals selected for the role, the environment, and the people they serve.
+                    </p>
+                    <Link href="/jobs" className="shrink-0 inline-flex items-center gap-2 bg-brand-primary hover:bg-brand-primary-dark text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-brand-primary/20 active:scale-95 transition-all">
+                        Join the Pristine Network <ArrowRight className="h-4 w-4" />
+                    </Link>
+                </Reveal>
+            </section>
+
+            {/* 5 ── TECHNOLOGY ────────────────────────────────────────────────── */}
+            <section id="technology" className="relative overflow-hidden bg-zinc-950 text-white py-24">
+                <div className="absolute -top-20 left-1/4 w-[26rem] h-[26rem] bg-brand-accent/15 rounded-full blur-[150px] animate-float-slow" />
+                <div className="absolute bottom-[-6rem] right-[10%] w-[22rem] h-[22rem] bg-brand-primary/15 rounded-full blur-[150px] animate-float-medium" />
+                <div className="relative z-10 max-w-6xl mx-auto px-4">
+                    <Reveal className="max-w-2xl space-y-3">
+                        <span className="text-xs font-black uppercase tracking-[0.2em] text-brand-primary-light">Technology That Keeps Care Moving</span>
+                        <h2 className="text-3xl md:text-4xl font-black tracking-tight">Connected. Visible. Accountable.</h2>
+                        <p className="text-zinc-300 leading-relaxed">
+                            Pristine Health uses modern workforce technology to simplify coordination and improve service visibility.
+                        </p>
+                    </Reveal>
+
+                    <div className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {techCapabilities.map((s, i) => {
+                            const Icon = s.icon;
+                            return (
+                                <Reveal key={s.name} delay={i * 40}>
+                                    <div className="rounded-2xl p-5 h-full border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:-translate-y-1 transition-all duration-300 group backdrop-blur">
+                                        <div className="p-2.5 rounded-xl inline-flex bg-brand-primary/15 border border-brand-primary/20 group-hover:scale-110 transition-transform">
+                                            <Icon className="h-5 w-5 text-brand-primary-light" />
+                                        </div>
+                                        <h3 className="mt-3 text-sm font-bold text-white">{s.name}</h3>
+                                    </div>
+                                </Reveal>
+                            );
+                        })}
+                    </div>
+
+                    <Reveal className="mt-8 flex flex-wrap items-center gap-4" delay={120}>
+                        <p className="text-sm font-bold text-brand-primary-light">Less friction. Faster communication. Better coordination.</p>
+                        <a href="#contact" className="inline-flex items-center gap-2 bg-white text-zinc-900 hover:bg-zinc-100 font-bold px-6 py-3 rounded-xl active:scale-95 transition-all">
+                            Talk to Our Team <ArrowRight className="h-4 w-4" />
+                        </a>
+                    </Reveal>
+                </div>
+            </section>
+
+            {/* 6 ── FINAL CTA ─────────────────────────────────────────────────── */}
+            <section className="relative overflow-hidden bg-gradient-to-br from-brand-accent to-brand-accent-dark text-white py-24 px-4">
+                <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_20%_20%,white,transparent_45%)]" />
+                <Reveal className="relative z-10 max-w-3xl mx-auto text-center space-y-6">
+                    <Sparkles className="h-8 w-8 mx-auto text-brand-primary-light" />
+                    <h2 className="text-3xl md:text-5xl font-black tracking-tight">The right people make the difference.</h2>
+                    <p className="text-base md:text-lg text-blue-100 leading-relaxed">
+                        Whether you are filling an urgent shift, building reliable workforce capacity, or arranging personalized in-home care, Pristine Health helps you move forward with confidence.
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-4 pt-2">
+                        <a href="#contact" onClick={() => requestType("Facility Staffing")} className="bg-brand-primary hover:bg-brand-primary-dark text-white font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-brand-primary/30 flex items-center gap-2 active:scale-95 transition-all">
+                            Request Staffing <ArrowRight className="h-4 w-4" />
+                        </a>
+                        <a href="#contact" onClick={() => requestType("In-Home Care")} className="bg-white text-brand-accent hover:bg-zinc-100 font-bold px-6 py-3.5 rounded-xl flex items-center gap-2 active:scale-95 transition-all">
+                            <Home className="h-4 w-4" /> Get In-Home Care
+                        </a>
+                        <Link href="/jobs" className="bg-white/10 hover:bg-white/20 border border-white/30 text-white font-bold px-6 py-3.5 rounded-xl backdrop-blur flex items-center gap-2 active:scale-95 transition-all">
+                            Find Opportunities <ArrowRight className="h-4 w-4" />
+                        </Link>
+                    </div>
+                    <div className="pt-6">
+                        <p className="text-lg font-black tracking-tight">Pristine Health</p>
+                        <p className="text-xs uppercase tracking-[0.3em] text-blue-200">Staffing Needs Fulfillment</p>
+                    </div>
+                </Reveal>
+            </section>
+
+            {/* ── CONTACT ──────────────────────────────────────────────────── */}
+            <section id="contact" className="relative max-w-6xl mx-auto px-4 py-24 scroll-mt-24">
+                <Reveal className="max-w-2xl space-y-3">
+                    <Eyebrow>Get In Touch</Eyebrow>
+                    <h2 className="text-3xl md:text-4xl font-black text-text-primary tracking-tight">Let's talk about your care needs</h2>
+                    <p className="text-text-secondary leading-relaxed">
+                        Whether you're a facility with a coverage gap or a family arranging in-home care, our team is ready to help. Reach us directly or open the portal.
+                    </p>
+                </Reveal>
+
+                <div className="mt-10 grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
+                    {/* Contact form */}
+                    <Reveal className="lg:col-span-3">
+                        <form onSubmit={submitContact} className="crm-panel rounded-2xl p-6 md:p-7">
+                            {contactStatus === "sent" ? (
+                                <div className="text-center py-10 space-y-3">
+                                    <div className="mx-auto h-12 w-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                                        <CheckCircle2 className="h-6 w-6 text-emerald-500" />
+                                    </div>
+                                    <h3 className="text-lg font-black text-text-primary">Message sent</h3>
+                                    <p className="text-sm text-text-muted max-w-sm mx-auto">Thanks for reaching out — our team will get back to you within one business day.</p>
+                                    <button type="button" onClick={() => setContactStatus("idle")} className="text-xs font-bold text-brand-primary hover:text-brand-primary-dark">
+                                        Send another message
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Name</label>
+                                            <input required maxLength={120} value={contact.name} onChange={(e) => setContact({ ...contact, name: e.target.value })} placeholder="Jane Doe" className="ui-input w-full" />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Email</label>
+                                            <input type="email" required value={contact.email} onChange={(e) => setContact({ ...contact, email: e.target.value })} placeholder="jane@example.com" className="ui-input w-full" />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Phone <span className="normal-case font-normal">(optional)</span></label>
+                                            <input maxLength={40} value={contact.phone} onChange={(e) => setContact({ ...contact, phone: e.target.value })} placeholder="(206) 555-0100" className="ui-input w-full" />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] font-bold uppercase tracking-wider text-text-muted">I'm interested in</label>
+                                            <select value={contact.inquiryType} onChange={(e) => setContact({ ...contact, inquiryType: e.target.value })} className="ui-input w-full">
+                                                <option>Facility Staffing</option>
+                                                <option>In-Home Care</option>
+                                                <option>Careers</option>
+                                                <option>General</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Message</label>
+                                        <textarea required rows={4} maxLength={5000} value={contact.message} onChange={(e) => setContact({ ...contact, message: e.target.value })} placeholder="Tell us about your staffing or care needs…" className="ui-input w-full resize-none" />
+                                    </div>
+                                    {/* Honeypot — hidden from users, catches bots */}
+                                    <input type="text" tabIndex={-1} autoComplete="off" aria-hidden="true" value={contact.company} onChange={(e) => setContact({ ...contact, company: e.target.value })} className="hidden" />
+                                    {contactStatus === "error" && (
+                                        <p className="text-xs text-rose-500">{contactError}</p>
+                                    )}
+                                    <button type="submit" disabled={contactStatus === "sending"} className="inline-flex items-center gap-2 bg-brand-primary hover:bg-brand-primary-dark disabled:opacity-60 text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-brand-primary/20 active:scale-95 transition-all">
+                                        {contactStatus === "sending" ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</> : <><Send className="h-4 w-4" /> Send Message</>}
+                                    </button>
+                                </div>
+                            )}
+                        </form>
+                    </Reveal>
+
+                    {/* Direct contact methods */}
+                    <Reveal className="lg:col-span-2 space-y-4" delay={100}>
+                        <a href="tel:+12065716983" className="crm-panel rounded-2xl p-5 flex items-center gap-3 hover:border-brand-primary/40 transition-colors group">
+                            <div className="p-2.5 bg-brand-primary-muted rounded-xl border border-brand-primary/10 group-hover:scale-110 transition-transform shrink-0"><Phone className="h-5 w-5 text-brand-primary" /></div>
+                            <div>
+                                <p className="text-[10px] font-black uppercase tracking-wider text-text-muted">Call us</p>
+                                <p className="text-sm font-black text-text-primary">(206) 571-6983</p>
+                            </div>
+                        </a>
+                        <a href="mailto:support@pristinehealth.com" className="crm-panel rounded-2xl p-5 flex items-center gap-3 hover:border-brand-accent/40 transition-colors group">
+                            <div className="p-2.5 bg-brand-accent-muted rounded-xl border border-brand-accent/10 group-hover:scale-110 transition-transform shrink-0"><Mail className="h-5 w-5 text-brand-accent" /></div>
+                            <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-wider text-text-muted">Email us</p>
+                                <p className="text-sm font-black text-text-primary break-all">support@pristinehealth.com</p>
+                            </div>
+                        </a>
+                        <div className="crm-panel rounded-2xl p-5 flex items-center gap-3">
+                            <div className="p-2.5 bg-brand-primary-muted rounded-xl border border-brand-primary/10 shrink-0"><MapPin className="h-5 w-5 text-brand-primary" /></div>
+                            <div>
+                                <p className="text-[10px] font-black uppercase tracking-wider text-text-muted">Visit</p>
+                                <p className="text-sm font-black text-text-primary">Seattle, WA · 98103-4029</p>
+                            </div>
+                        </div>
+                    </Reveal>
+                </div>
+            </section>
+
+            {/* Footer */}
+            <footer className="bg-zinc-950 text-zinc-400 py-16 px-4 border-t border-white/5 text-sm">
+                <div className="max-w-6xl mx-auto grid grid-cols-2 md:grid-cols-5 gap-8 pb-12 border-b border-white/5">
+                    <div className="col-span-2 space-y-4">
+                        <img src="/logo.png" alt="Pristine Health" className="h-12 w-auto brightness-110" />
+                        <p className="text-xs text-zinc-500 leading-relaxed max-w-sm">
+                            Providing dependable, credentialed, and compliant healthcare staffing and in-home care. Headquartered in Seattle WA, 98103-4029.
+                        </p>
+                    </div>
+                    <div className="space-y-3">
+                        <h4 className="text-white font-bold text-sm">Solutions</h4>
+                        <ul className="space-y-2 text-xs">
+                            <li><a href="#workforce" className="hover:text-white transition-colors">Facility Staffing</a></li>
+                            <li><a href="#in-home" className="hover:text-white transition-colors">In-Home Care</a></li>
+                            <li><a href="#technology" className="hover:text-white transition-colors">Technology</a></li>
+                        </ul>
+                    </div>
+                    <div className="space-y-3">
+                        <h4 className="text-white font-bold text-sm">Careers</h4>
+                        <ul className="space-y-2 text-xs">
+                            <li><Link href="/jobs" className="hover:text-white transition-colors">Open Positions</Link></li>
+                            <li><Link href="/jobs/track" className="hover:text-white transition-colors">Track Application</Link></li>
+                            <li><Link href="/login?callbackUrl=/dashboard" className="hover:text-white transition-colors">Portal Login</Link></li>
+                        </ul>
+                    </div>
+                    <div className="space-y-3">
+                        <h4 className="text-white font-bold text-sm">Contact</h4>
+                        <ul className="space-y-2 text-xs">
+                            <li className="flex items-center gap-1.5"><Phone className="h-3 w-3 text-brand-primary" /> (206) 571-6983</li>
+                            <li className="flex items-center gap-1.5"><Mail className="h-3 w-3 text-brand-primary" /> support@pristinehealth.com</li>
+                        </ul>
+                    </div>
+                </div>
+                <div className="max-w-6xl mx-auto pt-8 flex flex-col sm:flex-row justify-between items-center gap-4 text-xs text-zinc-600">
+                    <span>&copy; {new Date().getFullYear()} Pristine Health. All Rights Reserved.</span>
+                    <div className="flex gap-4">
+                        <span className="hover:text-zinc-400 cursor-pointer">Twitter</span>
+                        <span className="hover:text-zinc-400 cursor-pointer">LinkedIn</span>
+                        <span className="hover:text-zinc-400 cursor-pointer">Facebook</span>
+                    </div>
+                </div>
+            </footer>
         </div>
-
-
-        <button
-          onClick={handleGlobalSync}
-          disabled={isSyncing}
-          className="w-full flex items-center justify-start gap-3 px-3 py-2 mt-1 rounded-lg font-medium text-sm transition-all text-slate-600 dark:text-slate-400 hover:bg-brand-blue-muted dark:hover:bg-brand-blue-light/10 hover:text-brand-blue dark:hover:text-brand-blue-light disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <RefreshCw className={cn("h-5 w-5", isSyncing && "animate-spin text-brand-blue-light")} />
-          {isSyncing ? 'Syncing All Data...' : 'Manual Sync All'}
-        </button>
-      </div>
-
-      <div className="p-4 border-t border-slate-200 dark:border-slate-800">
-        <button
-          onClick={() => signOut({ callbackUrl: '/login' })}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-        >
-          <LogOut className="h-5 w-5" /> Sign Out
-        </button>
-      </div>
-    </>
-  );
-
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex font-sans">
-
-      {/* Desktop Sidebar */}
-      <aside className="w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex-col hidden md:flex shrink-0">
-        <SidebarContent />
-      </aside>
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
-
-        {/* Mobile Header Sidebar Toggle */}
-        <header className="md:hidden flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Pristine CRM</h1>
-          <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 text-slate-600 dark:text-slate-300">
-            {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </button>
-        </header>
-
-        {/* Mobile Sidebar Navigation */}
-        {mobileMenuOpen && (
-          <div className="md:hidden absolute top-[73px] left-0 right-0 bottom-0 bg-white dark:bg-slate-900 z-50 flex flex-col">
-            <SidebarContent />
-          </div>
-        )}
-
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50 dark:bg-slate-950">
-          <div className="max-w-6xl mx-auto">
-            {/* Dynamic Tab Content */}
-            {activeTab === "staff" && <StaffTab />}
-            {activeTab === "customers" && <CustomersTab />}
-            {activeTab === "contacts" && <ContactsTab />}
-            {activeTab === "projects" && <ProjectsTab />}
-            {activeTab === "tasks" && <TasksTab />}
-          </div>
-        </main>
-      </div>
-    </div>
-  );
+    );
 }
