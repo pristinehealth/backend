@@ -20,6 +20,16 @@ export interface StaffDocument extends mongoose.Document {
     emailVerified?: boolean;
     isBackendRegistered?: boolean;
     activeTimer?: { taskId: string, startTime: number };
+    // Position the staff member was hired into, stamped at application acceptance.
+    // Perfex does not send these, so the CRM sync ($set of Perfex fields) leaves
+    // them intact. Used for position-targeted compliance requirements.
+    positionId?: string | null;
+    positionTitle?: string | null;
+    // Denormalized compliance sort key, refreshed on compliance changes. Lets the
+    // staff list sort "issues first" at the DB level instead of computing per request.
+    complianceSeverity?: number; // 3 attention, 2 in-progress, 1 compliant, 0 none/unknown
+    complianceProblemCount?: number;
+    complianceCheckedAt?: Date | null;
 }
 
 const StaffSchema = new mongoose.Schema<StaffDocument>(
@@ -90,9 +100,43 @@ const StaffSchema = new mongoose.Schema<StaffDocument>(
         activeTimer: {
             taskId: { type: String },
             startTime: { type: Number }
-        }
+        },
+        positionId: {
+            type: String,
+            default: null,
+        },
+        positionTitle: {
+            type: String,
+            default: null,
+        },
+        complianceSeverity: {
+            type: Number,
+            default: 0,
+        },
+        complianceProblemCount: {
+            type: Number,
+            default: 0,
+        },
+        complianceCheckedAt: {
+            type: Date,
+            default: null,
+        },
     },
-    { timestamps: true }
+    // strict:false so every field Perfex sends is persisted, not silently dropped
+    // for lacking a schema path (e.g. facebook, last_ip). NOTE: Perfex also sends
+    // a `password` field — see sync routes if you want to strip it before storing.
+    { timestamps: true, strict: false }
 );
 
-export default mongoose.models.Staff || mongoose.model<StaffDocument>('Staff', StaffSchema);
+// Indexed so the staff-compliance list sorts "issues first" at the DB level.
+StaffSchema.index({ complianceSeverity: -1, complianceProblemCount: -1 });
+
+// Recompile a stale cached model that predates the compliance-sort fields, so the
+// new path + index register (dev HMR keeps the old model on the global otherwise).
+const cachedStaff = mongoose.models.Staff as mongoose.Model<StaffDocument> | undefined;
+if (cachedStaff && !cachedStaff.schema.path('complianceSeverity')) {
+    delete (mongoose.models as Record<string, unknown>).Staff;
+}
+
+export default (mongoose.models.Staff as mongoose.Model<StaffDocument>) ||
+    mongoose.model<StaffDocument>('Staff', StaffSchema);

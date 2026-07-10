@@ -40,6 +40,13 @@ async function getSyncConfig(): Promise<SyncConfig> {
 
 class CronManager {
     private timerId: NodeJS.Timeout | null = null;
+    // Monotonic token that invalidates any in-flight scheduling/timers. Because
+    // scheduleNext() sets `timerId` asynchronously (after getSyncConfig resolves),
+    // clearTimeout alone can't cancel a scheduling that hasn't armed yet. Every
+    // arm captures the current generation; a stale generation bails — so repeated
+    // start()/reschedule() calls (e.g. server boot + the on-connect start in
+    // mongoose.ts) collapse to exactly ONE live timer chain instead of many.
+    private generation: number = 0;
     public isActive: boolean = false;
 
     // Reflect current schedule in getStatus()
@@ -47,8 +54,14 @@ class CronManager {
     public scheduledHour: number = 2;
     public intervalMinutes: number = 60;
 
+    /** Cancel the current timer and invalidate any in-flight scheduling. */
+    private cancel() {
+        this.generation++;
+        if (this.timerId) { clearTimeout(this.timerId); this.timerId = null; }
+    }
+
     public start() {
-        if (this.timerId) clearTimeout(this.timerId);
+        this.cancel();
         this.isActive = true;
         this.scheduleNext();
     }
@@ -59,8 +72,9 @@ class CronManager {
      * The schedule is always armed via .finally() — sync failure won't prevent it.
      */
     public startWithImmediateSync() {
-        if (this.timerId) clearTimeout(this.timerId);
+        this.cancel();
         this.isActive = true;
+        const gen = this.generation;
 
         const baseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
         console.log('[CronManager] Server boot — running immediate startup sync...');
@@ -78,14 +92,16 @@ class CronManager {
                 console.error('[CronManager] Startup sync error:', err.message);
             })
             .finally(() => {
-                // Always arm the regular schedule after startup sync, win or lose
-                if (this.isActive) this.scheduleNext();
+                // Arm the regular schedule after startup sync — unless superseded.
+                if (this.isActive && gen === this.generation) this.scheduleNext();
             });
     }
 
     private scheduleNext() {
+        const gen = this.generation;
         getSyncConfig().then((cfg) => {
-            if (!this.isActive) return;
+            // Bail if a newer start()/reschedule()/stop() superseded this one.
+            if (!this.isActive || gen !== this.generation) return;
 
             this.currentMode = cfg.mode;
             this.scheduledHour = cfg.hour;
@@ -107,7 +123,7 @@ class CronManager {
             }
 
             this.timerId = setTimeout(async () => {
-                if (!this.isActive) return;
+                if (!this.isActive || gen !== this.generation) return;
                 console.log(`[CronManager] Running maintenance sync (mode: ${cfg.mode})...`);
                 const baseUrl = process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
                 try {
@@ -121,14 +137,14 @@ class CronManager {
                 } catch (error: any) {
                     console.error(`[CronManager] Sync error:`, error.message);
                 }
-                // Re-arm — re-reads config each time so dashboard changes take effect
-                this.scheduleNext();
+                // Re-arm the same chain (re-reads config so dashboard changes apply).
+                if (this.isActive && gen === this.generation) this.scheduleNext();
             }, msUntil);
         });
     }
 
     public stop() {
-        if (this.timerId) { clearTimeout(this.timerId); this.timerId = null; }
+        this.cancel();
         this.isActive = false;
         console.log(`[CronManager] Sync daemon stopped.`);
     }
@@ -139,7 +155,7 @@ class CronManager {
      */
     public reschedule() {
         if (this.isActive) {
-            if (this.timerId) clearTimeout(this.timerId);
+            this.cancel();
             this.scheduleNext();
         }
     }

@@ -35,7 +35,8 @@ const CustomerSchema = new mongoose.Schema<CustomerDocument>(
             default: []
         }
     },
-    { timestamps: true }
+    // strict:false so every field Perfex sends is persisted, not silently dropped.
+    { timestamps: true, strict: false }
 );
 
 export default mongoose.models.Customer || mongoose.model<CustomerDocument>('Customer', CustomerSchema);

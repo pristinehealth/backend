@@ -37,7 +37,9 @@ const ProjectSchema = new mongoose.Schema<ProjectDocument>(
             default: []
         }
     },
-    { timestamps: true }
+    // strict:false so every field Perfex sends is persisted, not silently dropped
+    // for lacking a schema path (e.g. project_created).
+    { timestamps: true, strict: false }
 );
 
 export default mongoose.models.Project || mongoose.model<ProjectDocument>('Project', ProjectSchema);

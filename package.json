@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "NODE_ENV=production node server.js",
     "lint": "eslint",
-    "sync": "node cron.js"
+    "sync": "node cron.js",
+    "migrate:compliance": "node migrations/run.js"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.11.2",

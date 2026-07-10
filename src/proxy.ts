@@ -21,22 +21,27 @@ export default withAuth(
             authorized: ({ req, token }) => {
                 const { pathname } = req.nextUrl;
 
-                // Unprotected routes:
+                // Public routes — no auth required:
                 if (
+                    pathname === "/" ||                          // Landing page
+                    pathname.startsWith("/jobs") ||             // Public job listings
                     pathname.startsWith("/login") ||
                     pathname.startsWith("/register") ||
                     pathname.startsWith("/api/auth") ||
+                    pathname.startsWith("/api/jobs") ||         // Public jobs API
+                    pathname.startsWith("/api/applications") || // Candidates applying
+                    pathname.startsWith("/api/contacts") ||     // Contact form
                     pathname.startsWith("/api/mobile/auth") ||
                     pathname.startsWith("/api/mobile/tasks") ||
                     pathname.startsWith("/api/mobile/timesheets") ||
                     pathname.startsWith("/api/mobile/profile") ||
-                    pathname.startsWith("/api/cron") ||   // Allow server boot auto-start + cron manager
-                    pathname.startsWith("/api/sync")      // Allow local cron manager to hit sync endpoints
+                    pathname.startsWith("/api/cron") ||         // Server boot auto-start + cron manager
+                    pathname.startsWith("/api/sync")            // Local cron manager sync endpoints
                 ) {
                     return true;
                 }
 
-                // Restrict all other routes (like `/` dashboard) to logged in users only
+                // Everything else (admin dashboard, admin APIs) requires a valid session
                 return !!token;
             },
         },
