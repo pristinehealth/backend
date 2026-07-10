@@ -70,7 +70,7 @@ export function RetentionManager() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [preview, setPreview] = useState<any | null>(null);
-  const [confirmCleanup, setConfirmCleanup] = useState<{ staffId?: string } | null>(null);
+  const [confirmCleanup, setConfirmCleanup] = useState<{ staffId?: string; force?: boolean } | null>(null);
 
   const flash = (t: string) => {
     setMessage(t);
@@ -92,11 +92,12 @@ export function RetentionManager() {
 
   const confirmCleanupRun = async () => {
     const staffId = confirmCleanup?.staffId;
+    const force = confirmCleanup?.force;
     setConfirmCleanup(null);
     setBusy(staffId || "all");
     setError("");
     try {
-      const d = await disposeCompliance({ dryRun: false, ...(staffId ? { staffId } : {}) }).unwrap();
+      const d = await disposeCompliance({ dryRun: false, ...(staffId ? { staffId } : {}), ...(force ? { force: true } : {}) }).unwrap();
       flash(`Disposed ${d.recordsDisposed} record(s), ${d.filesDeleted} file(s).`);
       setPreview(null);
     } catch (err: any) {
@@ -226,9 +227,9 @@ export function RetentionManager() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setConfirmCleanup({ staffId: st.staffId })}
-                      disabled={busy === st.staffId || st.counts.due === 0}
-                      title={st.counts.due === 0 ? "Nothing due for this staff member" : "Dispose this staff member's due data"}
+                      onClick={() => setConfirmCleanup({ staffId: st.staffId, force: true })}
+                      disabled={busy === st.staffId}
+                      title="Permanently dispose ALL of this staff member's compliance data, ignoring retention"
                       className="inline-flex items-center gap-1 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 text-xs font-bold px-2.5 py-1.5 disabled:opacity-40"
                     >
                       {busy === st.staffId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Clean
@@ -276,10 +277,14 @@ export function RetentionManager() {
               </div>
               <div>
                 <h3 className="text-base font-black text-text-primary">
-                  Permanently dispose {confirmCleanup.staffId ? "this staff member’s" : "ALL"} due data?
+                  {confirmCleanup.force
+                    ? "Force-dispose all of this staff member’s data?"
+                    : "Permanently dispose ALL due data?"}
                 </h3>
                 <p className="mt-1 text-sm text-text-secondary">
-                  This deletes the due-for-disposal compliance records, documents, and their files. This cannot be undone.
+                  {confirmCleanup.force
+                    ? "This deletes EVERY archived compliance record, document, and file for this terminated staff member — including items with no retention set or whose window hasn’t elapsed. This cannot be undone."
+                    : "This deletes the due-for-disposal compliance records, documents, and their files. This cannot be undone."}
                 </p>
               </div>
             </div>

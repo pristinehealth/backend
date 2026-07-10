@@ -27,10 +27,13 @@ export default withAuth(
                     pathname.startsWith("/jobs") ||             // Public job listings
                     pathname.startsWith("/login") ||
                     pathname.startsWith("/register") ||
-                    pathname.startsWith("/api/auth") ||
+                    pathname.startsWith("/forgot-password") || // Public admin password-reset page
+                    pathname.startsWith("/api/auth") ||         // Incl. forgot-password + reset-password APIs
                     pathname.startsWith("/api/jobs") ||         // Public jobs API
                     pathname.startsWith("/api/applications") || // Candidates applying
-                    pathname.startsWith("/api/contacts") ||     // Contact form
+                    pathname === "/api/contact" ||              // Public contact form (NOT /api/contacts, which is admin)
+                    pathname.startsWith("/api/contact/") ||
+                    pathname.startsWith("/api/upload") ||       // Public file uploads (applicants)
                     pathname.startsWith("/api/mobile/auth") ||
                     pathname.startsWith("/api/mobile/tasks") ||
                     pathname.startsWith("/api/mobile/timesheets") ||

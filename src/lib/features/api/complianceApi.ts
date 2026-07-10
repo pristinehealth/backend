@@ -100,7 +100,7 @@ export const complianceApi = createApi({
 
     // Disposal. A dry-run preview mutates nothing, so it invalidates nothing;
     // a real run changes retention + overview posture.
-    disposeCompliance: builder.mutation<any, { dryRun: boolean; staffId?: string }>({
+    disposeCompliance: builder.mutation<any, { dryRun: boolean; staffId?: string; force?: boolean }>({
       query: (body) => ({ url: "compliance/dispose", method: "POST", body }),
       invalidatesTags: (_r, _e, arg) =>
         arg.dryRun

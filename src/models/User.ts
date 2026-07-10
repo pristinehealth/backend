@@ -5,6 +5,11 @@ export interface UserDocument extends mongoose.Document {
     email: string;
     password?: string;
     role: string;
+    // Self-service password reset (OTP by email). All select:false so they never
+    // leave the DB by accident. The OTP itself is stored bcrypt-hashed.
+    resetOtpHash?: string;
+    resetOtpExpiry?: Date;
+    resetOtpAttempts?: number;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -34,8 +39,21 @@ const UserSchema = new mongoose.Schema<UserDocument>(
             default: 'admin', // Enforcing this as an admin-only portal for now
             enum: ['admin', 'superadmin'],
         },
+        resetOtpHash: { type: String, select: false },
+        resetOtpExpiry: { type: Date, select: false },
+        resetOtpAttempts: { type: Number, select: false },
     },
     { timestamps: true }
 );
 
-export default mongoose.models.User || mongoose.model<UserDocument>('User', UserSchema);
+// Recompile a stale cached model that predates the password-reset fields so the
+// new schema paths register. Dev HMR keeps the previously compiled model, and in
+// strict mode Mongoose would silently strip resetOtp* from writes — leaving the
+// reset code unstored and every verification failing with "invalid or expired".
+const cachedUser = mongoose.models.User as mongoose.Model<UserDocument> | undefined;
+if (cachedUser && !cachedUser.schema.path('resetOtpHash')) {
+    delete (mongoose.models as Record<string, unknown>).User;
+}
+
+export default (mongoose.models.User as mongoose.Model<UserDocument>) ||
+    mongoose.model<UserDocument>('User', UserSchema);
