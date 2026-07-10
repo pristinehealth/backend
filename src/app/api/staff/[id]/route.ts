@@ -50,9 +50,10 @@ export async function GET(
           : null;
 
         const formFields = Array.isArray(form?.customFields) ? form.customFields : [];
+        const cfv: any = latestApplication.customFieldValues;
         const submittedFields = formFields
           .map((field: any) => {
-            const rawValue = latestApplication.customFieldValues?.[field.name];
+            const rawValue = cfv instanceof Map ? cfv.get(field.name) : cfv?.[field.name];
             if (rawValue === undefined || rawValue === null || rawValue === '') {
               return null;
             }

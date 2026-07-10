@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowRight, Loader2, Lock, Search } from "lucide-react";
@@ -15,7 +15,7 @@ interface JobApplication {
   createdAt: string;
 }
 
-export default function TrackApplicationsPage() {
+function TrackApplicationsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -245,5 +245,13 @@ export default function TrackApplicationsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function TrackApplicationsPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <TrackApplicationsInner />
+    </Suspense>
   );
 }
