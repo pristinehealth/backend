@@ -40,11 +40,7 @@ export default function RegisterPage() {
             <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.012)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.012)_1px,transparent_1px)] bg-[size:56px_56px] pointer-events-none"></div>
 
             <div className="max-w-md w-full bg-gradient-to-b from-white/[0.04] to-white/[0.01] rounded-2xl p-8 shadow-[0_8px_40px_rgba(0,0,0,0.5),0_0_80px_rgba(6,182,212,0.02)] border border-white/[0.06] relative z-10">
-                {status === "loading" ? (
-                    <div className="flex justify-center items-center py-16">
-                        <Loader2 className="h-8 w-8 text-cyan-500 animate-spin" />
-                    </div>
-                ) : !authorized ? (
+                {!authorized ? (
                     <div className="text-center space-y-6">
                         <div>
                             <AlertCircle className="h-16 w-16 text-rose-400 mx-auto mb-4" />

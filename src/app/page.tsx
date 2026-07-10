@@ -50,13 +50,39 @@ export default function LandingPage() {
     const [contact, setContact] = useState({ name: "", email: "", phone: "", inquiryType: "Facility Staffing", message: "", company: "" });
     const [contactStatus, setContactStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
     const [contactError, setContactError] = useState("");
+    const renderedAt = useRef(Date.now()); // time-trap: when the page/form loaded
 
     useEffect(() => {
         setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
         const onScroll = () => setScrollY(window.scrollY);
         window.addEventListener("scroll", onScroll, { passive: true });
+
+        // Load reCAPTCHA v3 (invisible) if configured. No-op without a site key.
+        const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
+        if (siteKey && !document.getElementById("recaptcha-v3")) {
+            const s = document.createElement("script");
+            s.id = "recaptcha-v3";
+            s.src = `https://www.google.com/recaptcha/api.js?render=${siteKey}`;
+            s.async = true;
+            s.defer = true;
+            document.head.appendChild(s);
+        }
+
         return () => window.removeEventListener("scroll", onScroll);
     }, []);
+
+    // Fetch a fresh reCAPTCHA v3 token at submit time. Returns "" if not configured.
+    const getRecaptchaToken = async (): Promise<string> => {
+        const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
+        const g = (window as unknown as { grecaptcha?: any }).grecaptcha;
+        if (!siteKey || !g?.execute) return "";
+        try {
+            await new Promise<void>((resolve) => g.ready(() => resolve()));
+            return await g.execute(siteKey, { action: "contact" });
+        } catch {
+            return "";
+        }
+    };
 
     const toggleTheme = () => {
         const next = theme === "dark" ? "light" : "dark";
@@ -73,10 +99,11 @@ export default function LandingPage() {
         setContactStatus("sending");
         setContactError("");
         try {
+            const recaptchaToken = await getRecaptchaToken();
             const res = await fetch("/api/contact", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(contact),
+                body: JSON.stringify({ ...contact, renderedAt: renderedAt.current, recaptchaToken }),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
@@ -150,7 +177,7 @@ export default function LandingPage() {
                 <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2">
                     <div className="flex items-center gap-4">
                         <span className="flex items-center gap-1"><Phone className="h-3 w-3 text-brand-primary" /> (206) 571-6983</span>
-                        <span className="flex items-center gap-1"><Mail className="h-3 w-3 text-brand-primary" /> support@pristinehealth.com</span>
+                        <span className="flex items-center gap-1"><Mail className="h-3 w-3 text-brand-primary" /> info@pristinehealthstaffing.com</span>
                     </div>
                     <span className="hidden sm:block">Seattle WA, 98103-4029</span>
                 </div>
@@ -496,11 +523,11 @@ export default function LandingPage() {
                                 <p className="text-sm font-black text-text-primary">(206) 571-6983</p>
                             </div>
                         </a>
-                        <a href="mailto:support@pristinehealth.com" className="crm-panel rounded-2xl p-5 flex items-center gap-3 hover:border-brand-accent/40 transition-colors group">
+                        <a href="mailto:info@pristinehealthstaffing.com" className="crm-panel rounded-2xl p-5 flex items-center gap-3 hover:border-brand-accent/40 transition-colors group">
                             <div className="p-2.5 bg-brand-accent-muted rounded-xl border border-brand-accent/10 group-hover:scale-110 transition-transform shrink-0"><Mail className="h-5 w-5 text-brand-accent" /></div>
                             <div className="min-w-0">
                                 <p className="text-[10px] font-black uppercase tracking-wider text-text-muted">Email us</p>
-                                <p className="text-sm font-black text-text-primary break-all">support@pristinehealth.com</p>
+                                <p className="text-sm font-black text-text-primary break-all">info@pristinehealthstaffing.com</p>
                             </div>
                         </a>
                         <div className="crm-panel rounded-2xl p-5 flex items-center gap-3">
@@ -543,7 +570,7 @@ export default function LandingPage() {
                         <h4 className="text-white font-bold text-sm">Contact</h4>
                         <ul className="space-y-2 text-xs">
                             <li className="flex items-center gap-1.5"><Phone className="h-3 w-3 text-brand-primary" /> (206) 571-6983</li>
-                            <li className="flex items-center gap-1.5"><Mail className="h-3 w-3 text-brand-primary" /> support@pristinehealth.com</li>
+                            <li className="flex items-center gap-1.5"><Mail className="h-3 w-3 text-brand-primary" /> info@pristinehealthstaffing.com</li>
                         </ul>
                     </div>
                 </div>

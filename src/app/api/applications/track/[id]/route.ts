@@ -265,7 +265,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const submittedTypes = new Set(normalizedDocs.map((doc) => doc.documentType));
 
     application.applicantName = normalizedApplicantName;
-    application.customFieldValues = validatedValues;
+    application.customFieldValues = new Map(Object.entries(validatedValues));
     application.status = 'pending';
     application.notes = [
       ...(Array.isArray(application.notes) ? application.notes : []),

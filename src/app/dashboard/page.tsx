@@ -89,14 +89,14 @@ export default function Dashboard() {
 
   const tabs = [
     { id: "overview", label: "Overview", icon: LayoutDashboard, description: "Executive summary" },
-    { id: "staff", label: "Staff", icon: Users },
-    { id: "customers", label: "Customers", icon: Building2 },
-    { id: "contacts", label: "Contacts", icon: UsersRound },
-    { id: "projects", label: "Projects", icon: ClipboardList },
-    { id: "tasks", label: "Tasks", icon: ClipboardList },
-    { id: "jobs", label: "Jobs", icon: Briefcase },
-    { id: "compliance", label: "Compliance", icon: ShieldCheck },
-    { id: "settings", label: "Settings", icon: Settings },
+    { id: "staff", label: "Staff", icon: Users, description: "Team directory & compliance" },
+    { id: "customers", label: "Customers", icon: Building2, description: "Client accounts" },
+    { id: "contacts", label: "Contacts", icon: UsersRound, description: "Contact records" },
+    { id: "projects", label: "Projects", icon: ClipboardList, description: "Projects & delivery" },
+    { id: "tasks", label: "Tasks", icon: ClipboardList, description: "Tasks & service reports" },
+    { id: "jobs", label: "Jobs", icon: Briefcase, description: "Postings & applications" },
+    { id: "compliance", label: "Compliance", icon: ShieldCheck, description: "Requirements & credentials" },
+    { id: "settings", label: "Settings", icon: Settings, description: "Account & system" },
   ] as const;
 
   const activeTabMeta = tabs.find((tab) => tab.id === activeTab);
