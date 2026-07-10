@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import dbConnect from '@/lib/mongoose';
 import ApplicationAccessSession from '@/models/ApplicationAccessSession';
+import { rateLimit, clientIp } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,17 @@ function hashToken(token: string) {
 
 export async function POST(request: Request) {
   try {
+    // Rate limit verification attempts — the key defense against brute-forcing
+    // the 6-digit code (alongside code expiry).
+    const ip = clientIp(request);
+    const ipBurst = rateLimit(`otp-vfy:ip:${ip}`, 10, 60_000);
+    if (!ipBurst.ok) {
+      return NextResponse.json(
+        { error: 'Too many attempts — please wait a moment and try again.' },
+        { status: 429, headers: { 'Retry-After': String(ipBurst.retryAfter) } }
+      );
+    }
+
     await dbConnect();
 
     const body = await request.json();
@@ -19,6 +31,15 @@ export async function POST(request: Request) {
 
     if (!email || !code) {
       return NextResponse.json({ error: 'Email and verification code are required' }, { status: 400 });
+    }
+
+    // Per-email attempt cap: at most a handful of code guesses per window.
+    const emailLimit = rateLimit(`otp-vfy:email:${email}`, 6, 10 * 60_000);
+    if (!emailLimit.ok) {
+      return NextResponse.json(
+        { error: 'Too many verification attempts for this email. Please request a new code later.' },
+        { status: 429, headers: { 'Retry-After': String(emailLimit.retryAfter) } }
+      );
     }
 
     const session = await ApplicationAccessSession.findOne({ email });

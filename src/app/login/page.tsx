@@ -141,6 +141,16 @@ export default function LoginPage() {
                             "Secure Login"
                         )}
                     </button>
+
+                    <div className="text-center">
+                        <button
+                            type="button"
+                            onClick={() => router.push("/forgot-password")}
+                            className="text-xs text-slate-400 hover:text-cyan-400 transition-colors"
+                        >
+                            Forgot your password?
+                        </button>
+                    </div>
                 </form>
 
                 <div className="mt-8 pt-6 border-t border-white/10">

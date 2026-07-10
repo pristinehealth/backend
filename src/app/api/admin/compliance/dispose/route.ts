@@ -30,10 +30,14 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const dryRun = body?.dryRun !== false; // default true; must explicitly pass false
     const staffId = typeof body?.staffId === 'string' && body.staffId ? body.staffId : undefined;
-    console.log('[Compliance Dispose] start', { dryRun, staffId: staffId || 'ALL' });
-    const result = await disposeExpiredComplianceData({ dryRun, staffId });
+    // Manual override: dispose all of a staff member's archived data regardless
+    // of retention. Only honored with a staffId (never a global force).
+    const force = body?.force === true && !!staffId;
+    console.log('[Compliance Dispose] start', { dryRun, staffId: staffId || 'ALL', force });
+    const result = await disposeExpiredComplianceData({ dryRun, staffId, force });
     console.log('[Compliance Dispose]', dryRun ? 'preview' : 'DISPOSED', {
       staffId: staffId || 'ALL',
+      force,
       records: result.recordsDisposed,
       files: result.filesDeleted,
     });

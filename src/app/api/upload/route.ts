@@ -2,11 +2,26 @@ import { NextResponse } from 'next/server';
 import { uploadBuffer } from '@/lib/cloudinary';
 import dbConnect from '@/lib/mongoose';
 import UploadAsset from '@/models/UploadAsset';
+import { rateLimit, clientIp } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
     try {
+        // Rate limit anonymous uploads (public endpoint). Generous enough for a
+        // single application's several document/field uploads, but caps floods.
+        const ip = clientIp(request);
+        const burst = rateLimit(`upload:min:${ip}`, 20, 60_000);
+        const hourly = rateLimit(`upload:hr:${ip}`, 80, 60 * 60_000);
+        if (!burst.ok || !hourly.ok) {
+            const retryAfter = Math.max(burst.retryAfter, hourly.retryAfter);
+            console.warn('[Upload Route] rate limited', { ip, retryAfter });
+            return NextResponse.json(
+                { error: 'Too many uploads — please wait a moment and try again.' },
+                { status: 429, headers: { 'Retry-After': String(retryAfter) } }
+            );
+        }
+
         const formData = await request.formData();
         const file = formData.get('file') as File | null;
         const source = ((formData.get('source') as string | null) || 'job_apply').trim();

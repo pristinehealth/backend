@@ -299,14 +299,22 @@ export interface DisposeResult {
  * Deletes the Cloudinary file, the evidence, and the record, and writes an
  * append-only `disposed` audit event. Defaults to **dry-run** — pass
  * `{ dryRun: false }` to actually delete.
+ *
+ * `force` (only honored together with `staffId`) is a manual override: it
+ * disposes ALL of that terminated staff member's archived items regardless of
+ * retention period or whether the window has elapsed — for clearing data on
+ * requirements that never had a retention set ("held indefinitely"). The
+ * active-staff safety still applies (a returned staff member is never disposed).
  */
 export async function disposeExpiredComplianceData(opts?: {
   dryRun?: boolean;
   staffId?: string; // scope disposal to one terminated staff member
+  force?: boolean;  // manual override: ignore retention window (requires staffId)
 }): Promise<DisposeResult> {
   await dbConnect();
   const dryRun = opts?.dryRun ?? true;
   const scopeStaffId = opts?.staffId ? String(opts.staffId) : null;
+  const force = !!opts?.force && !!scopeStaffId; // force is scoped-only, never global
   const now = new Date();
 
   const reqs = await getAllRequirementDefinitions();
@@ -336,9 +344,14 @@ export async function disposeExpiredComplianceData(opts?: {
   for (const rec of records as any[]) {
     if (isActive(String(rec.staffId))) continue;
     const rd = retentionByKey.get(rec.requirementKey);
-    if (rd == null) continue; // indefinite / legal hold
-    const disposeAt = elapsed(rec.archivedAt, rd);
-    if (disposeAt > now) continue;
+    let disposeAt: Date;
+    if (force) {
+      disposeAt = now; // manual override — dispose now regardless of retention
+    } else {
+      if (rd == null) continue; // indefinite / legal hold
+      disposeAt = elapsed(rec.archivedAt, rd);
+      if (disposeAt > now) continue;
+    }
 
     const evs = await ComplianceEvidence.find({ recordId: rec._id }).lean();
     for (const ev of evs as any[]) {
@@ -352,13 +365,15 @@ export async function disposeExpiredComplianceData(opts?: {
     result.items.push({ type: 'record', staffId: String(rec.staffId), key: rec.requirementKey, disposeAt: disposeAt.toISOString() });
 
     if (!dryRun) {
-      await ComplianceEvidence.deleteMany({ recordId: rec._id });
+      // Write the append-only audit event FIRST, so a failure here can't leave
+      // evidence/record already deleted with no audit trail.
       await ComplianceEvent.create({
         recordId: rec._id,
         eventType: 'disposed',
         actor: 'system',
-        payload: { requirementKey: rec.requirementKey, retentionDays: rd, disposedAt: now },
+        payload: { requirementKey: rec.requirementKey, retentionDays: rd, forced: force, disposedAt: now },
       });
+      await ComplianceEvidence.deleteMany({ recordId: rec._id });
       await StaffComplianceRecord.deleteOne({ _id: rec._id });
     }
   }

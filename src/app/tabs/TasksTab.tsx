@@ -127,14 +127,14 @@ export function TasksTab() {
             {/* Filters Row */}
             <div className="flex flex-wrap gap-3 items-center">
                 {/* Staff search */}
-                <div className="relative">
+                <div className="relative w-full sm:w-auto">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
                     <input
                         type="text"
                         value={staffInput}
                         onChange={e => setStaffInput(e.target.value)}
                         placeholder="Search by caregiver…"
-                        className="pl-9 pr-4 py-2 rounded-xl border border-white/10 bg-black/40 text-sm text-white placeholder-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 outline-none w-52 transition-all"
+                        className="pl-9 pr-4 py-2 rounded-xl border border-white/10 bg-black/40 text-sm text-white placeholder-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 outline-none w-full sm:w-52 transition-all"
                     />
                 </div>
 
