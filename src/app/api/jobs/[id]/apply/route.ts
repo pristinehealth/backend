@@ -6,8 +6,11 @@ import JobApplication from '@/models/JobApplication';
 import ApplicationDocument from '@/models/ApplicationDocument';
 import UploadAsset from '@/models/UploadAsset';
 import { type DocumentType } from '@/models/ApplicationDocument';
-import { requiresFileUpload, getDocumentLabel } from '@/lib/documentMetadata';
+import { requiresFileUpload, getDocumentLabel, metadataValueError } from '@/lib/documentMetadata';
 import { getApplicationDocumentRequirements } from '@/lib/compliance';
+import { resolveFileReference } from '@/lib/uploadResolve';
+import { sendNewApplicationAdminEmail } from '@/lib/mailer';
+import Settings from '@/models/Settings';
 
 export const dynamic = 'force-dynamic';
 
@@ -81,6 +84,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             }
         }
 
+        // Custom-field file answers arrive as publicId references (or, legacy, a
+        // URL). Resolve them to the stored URL server-side before persisting.
+        for (const field of formFields) {
+            if (field.type === 'file' && typeof validatedValues[field.name] === 'string' && validatedValues[field.name]) {
+                validatedValues[field.name] = await resolveFileReference(validatedValues[field.name]);
+            }
+        }
+
         const submittedDocs = Array.isArray(documents) ? documents : [];
         const submittedByType = new Map<DocumentType, any>();
         submittedDocs
@@ -99,6 +110,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             if (!rule.requiresFile) {
                 if (typeof submitted.value !== 'string' || !submitted.value.trim()) {
                     return NextResponse.json({ error: `Please provide the required ${rule.label}` }, { status: 400 });
+                }
+                const fmtError = metadataValueError(rule.documentType as DocumentType, submitted.value);
+                if (fmtError) {
+                    return NextResponse.json({ error: fmtError }, { status: 400 });
                 }
                 continue;
             }
@@ -143,18 +158,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             termsAgreedAt: new Date(),
         });
 
-        const normalizedDocs = submittedDocs
+        const normalizedDocs = (await Promise.all(submittedDocs
             .filter((doc) => doc && doc.documentType)
-            .map((doc) => {
+            .map(async (doc) => {
                 const meta = reqMetaByType.get(doc.documentType as string);
                 const needsFile = meta ? meta.requiresFile : requiresFileUpload(doc.documentType as DocumentType);
 
                 if (needsFile) {
+                    // The client sends a publicId reference (or, legacy, a URL) —
+                    // resolve it to the stored URL server-side.
+                    const fileUrl = await resolveFileReference(doc.publicId || doc.fileUrl);
                     return {
                         applicationId: application._id,
                         documentType: doc.documentType as DocumentType,
                         deliveryMethod: doc.deliveryMethod === 'email' ? 'email' : 'upload',
-                        fileUrl: typeof doc.fileUrl === 'string' ? doc.fileUrl : '',
+                        fileUrl,
                         fileName: typeof doc.fileName === 'string' ? doc.fileName : '',
                         value: '',
                         expiryDate: doc.expiryDate ? new Date(doc.expiryDate) : null,
@@ -178,7 +196,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
                     uploadedAt: new Date(),
                     status: 'pending' as const,
                 };
-            })
+            })))
             .filter((doc): doc is NonNullable<typeof doc> => doc !== null);
 
         if (normalizedDocs.length > 0) {
@@ -203,6 +221,23 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
                     },
                 }
             );
+        }
+
+        // Notify the admin/recruiting inbox — gated by a settings toggle, and
+        // best-effort so it never blocks the submit.
+        try {
+            const setting = await Settings.findOne({ key: 'app_notify_new_application' }).lean();
+            const shouldNotify = (setting as any)?.value !== 'false';
+            if (shouldNotify) {
+                await sendNewApplicationAdminEmail({
+                    applicantName: normalizedApplicantName,
+                    applicantEmail,
+                    jobTitle: job.title || 'Job Position',
+                    applicationId: String(application._id),
+                });
+            }
+        } catch (mailErr: any) {
+            console.error('[Apply] Failed to send admin notification email:', mailErr?.message || mailErr);
         }
 
         return NextResponse.json({

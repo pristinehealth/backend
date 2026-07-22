@@ -23,6 +23,13 @@ export interface StaffComplianceRecordDoc extends mongoose.Document {
   // rather than it applying via role/position targeting. Manually-assigned
   // records always surface for the staff member regardless of targeting.
   assignedManually?: boolean;
+  // Admin removed this requirement for THIS staff member specifically. The
+  // requirement stays exempted (hidden, not counted) even though role/position
+  // targeting would otherwise apply it — and it is not re-materialized. Cleared
+  // if the requirement is later re-attached.
+  exempted?: boolean;
+  exemptedAt?: Date | null;
+  exemptedBy?: string | null;
   // Set when the staff member is terminated/removed from Perfex. Starts the
   // retention clock; secure disposal happens retentionDays after this.
   archivedAt?: Date | null;
@@ -60,6 +67,9 @@ const StaffComplianceRecordSchema = new mongoose.Schema<StaffComplianceRecordDoc
     rejectionReason: { type: String, default: null },
     lastCheckedAt: { type: Date, default: null },
     assignedManually: { type: Boolean, default: false },
+    exempted: { type: Boolean, default: false },
+    exemptedAt: { type: Date, default: null },
+    exemptedBy: { type: String, default: null },
     archivedAt: { type: Date, default: null },
   },
   { timestamps: true }
@@ -70,5 +80,12 @@ StaffComplianceRecordSchema.index({ staffId: 1, requirementKey: 1 }, { unique: t
 StaffComplianceRecordSchema.index({ expiryDate: 1, status: 1 });
 StaffComplianceRecordSchema.index({ archivedAt: 1 }); // disposal sweep
 
-export default mongoose.models.StaffComplianceRecord ||
+// Drop a stale cached model that predates `exempted` so the schema recompiles
+// instead of strict-mode silently stripping the new path on save (dev HMR).
+const cached = mongoose.models.StaffComplianceRecord as mongoose.Model<StaffComplianceRecordDoc> | undefined;
+if (cached && !cached.schema.path('exempted')) {
+  delete (mongoose.models as Record<string, unknown>).StaffComplianceRecord;
+}
+
+export default (mongoose.models.StaffComplianceRecord as mongoose.Model<StaffComplianceRecordDoc>) ||
   mongoose.model<StaffComplianceRecordDoc>('StaffComplianceRecord', StaffComplianceRecordSchema);

@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useGetStaffQuery, useGetStaffByIdQuery } from "@/lib/features/api/perfexApi";
-import { 
-    Mail, Phone, AlertCircle, Loader2, X, Briefcase, CalendarDays, 
-    Fingerprint, ListTodo, Search, User, ShieldCheck, ShieldAlert, ShieldX, FileText, Eye, Clock3
+import {
+    Mail, Phone, AlertCircle, Loader2, X, Briefcase, CalendarDays,
+    Fingerprint, ListTodo, Search, User, ShieldCheck, ShieldAlert, ShieldX, FileText, Eye, Clock3, UserCheck
 } from "lucide-react";
 
 export function StaffTab() {
@@ -16,6 +16,8 @@ export function StaffTab() {
     const [complianceCards, setComplianceCards] = useState<any[]>([]);
     const [complianceLoading, setComplianceLoading] = useState(false);
     const [complianceError, setComplianceError] = useState("");
+    const [onboarding, setOnboarding] = useState<{ status: string; onboardingId: string | null } | null>(null);
+    const [onboardingLoading, setOnboardingLoading] = useState(false);
 
     const { data: rawData, isLoading, error: rtkError } = useGetStaffQuery();
     const { data: rawDetails, isLoading: detailsLoading } = useGetStaffByIdQuery(selectedStaffId as string, {
@@ -59,6 +61,24 @@ export function StaffTab() {
             })
             .finally(() => setComplianceLoading(false));
 
+        return () => controller.abort();
+    }, [staffDetails?.staffid]);
+
+    // Onboarding status for the selected staff (resolved from their accepted
+    // application → onboarding record).
+    useEffect(() => {
+        const staffId = staffDetails?.staffid;
+        if (!staffId) {
+            setOnboarding(null);
+            return;
+        }
+        const controller = new AbortController();
+        setOnboardingLoading(true);
+        fetch(`/api/admin/staff/${encodeURIComponent(staffId)}/onboarding`, { signal: controller.signal })
+            .then((res) => res.json())
+            .then((data) => setOnboarding({ status: data?.status || 'no_application', onboardingId: data?.onboardingId || null }))
+            .catch((err) => { if (err?.name !== 'AbortError') setOnboarding(null); })
+            .finally(() => setOnboardingLoading(false));
         return () => controller.abort();
     }, [staffDetails?.staffid]);
 
@@ -252,6 +272,41 @@ export function StaffTab() {
                                     <div className="border-t border-white/[0.06] pt-5 space-y-3">
                                         <div className="flex items-center justify-between gap-3">
                                             <h4 className="flex items-center gap-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                                <UserCheck className="h-3.5 w-3.5" /> Onboarding
+                                            </h4>
+                                            <button
+                                                type="button"
+                                                onClick={() => router.push('/dashboard?tab=onboarding')}
+                                                className="text-[10px] font-bold text-cyan-400 hover:text-cyan-300 uppercase tracking-wider"
+                                            >
+                                                Open onboarding →
+                                            </button>
+                                        </div>
+                                        {onboardingLoading ? (
+                                            <div className="flex items-center gap-2 text-slate-500 text-xs">
+                                                <Loader2 className="h-4 w-4 animate-spin text-cyan-500" /> Loading onboarding...
+                                            </div>
+                                        ) : (() => {
+                                            const s = onboarding?.status;
+                                            if (!s || s === 'no_application') {
+                                                return <div className="text-xs text-slate-500 italic bg-black/20 rounded-xl p-3">No accepted application on file.</div>;
+                                            }
+                                            const meta = s === 'completed'
+                                                ? { label: 'Completed', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' }
+                                                : s === 'in_progress'
+                                                    ? { label: 'In progress', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' }
+                                                    : { label: 'Not started', cls: 'bg-white/5 text-slate-400 border-white/10' };
+                                            return (
+                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${meta.cls}`}>
+                                                    {meta.label}
+                                                </span>
+                                            );
+                                        })()}
+                                    </div>
+
+                                    <div className="border-t border-white/[0.06] pt-5 space-y-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <h4 className="flex items-center gap-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                                                 <ShieldCheck className="h-3.5 w-3.5" /> Compliance Documents
                                             </h4>
                                             <button
@@ -296,7 +351,7 @@ export function StaffTab() {
                                                                     <span className="inline-flex items-center gap-1"><Clock3 className="h-3 w-3" /> Expiry: {card.expiryDate ? new Date(card.expiryDate).toLocaleDateString() : 'None set'}</span>
                                                                 )}
                                                                 {card.evidence?.fileUrl ? (
-                                                                    <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" /> <a href={card.evidence.fileUrl} target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">View file</a></span>
+                                                                    <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" /> <a href={`/api/admin/file?src=${encodeURIComponent(card.evidence.fileUrl)}`} target="_blank" rel="noreferrer" className="text-cyan-400 hover:underline">View file</a></span>
                                                                 ) : card.evidence?.reference ? (
                                                                     <span className="inline-flex items-center gap-1"><FileText className="h-3 w-3" /> Recorded: <span className="text-slate-300 font-semibold">{card.evidence.reference}</span></span>
                                                                 ) : (

@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 export interface CustomFieldDefinition {
     name: string;      // machine key (e.g. "years_of_experience")
     label: string;     // user-facing label (e.g. "Years of Experience")
-    type: 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file';
+    type: 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file' | 'date';
     required: boolean;
     options?: string[]; // choices for select/checkbox
     section?: string;   // form section this question belongs to (e.g. "Personal details")
@@ -16,6 +16,11 @@ export interface JobSection {
 
 export interface JobPositionDocument extends mongoose.Document {
     title: string;
+    // Where the role is based. `location` is the state (a controlled value from
+    // usStates — indexed/filterable); `city` is optional free text. Shown on the
+    // public listing, job detail, and application page.
+    location?: string | null;
+    city?: string | null;
     sections: JobSection[];
     status: 'draft' | 'open' | 'closed';
     formId?: mongoose.Types.ObjectId;
@@ -33,6 +38,16 @@ const JobPositionSchema = new mongoose.Schema<JobPositionDocument>(
         title: {
             type: String,
             required: [true, 'Please provide a job title'],
+            trim: true,
+        },
+        location: {
+            type: String,
+            default: null,
+            trim: true,
+        },
+        city: {
+            type: String,
+            default: null,
             trim: true,
         },
         sections: [
@@ -61,6 +76,9 @@ const JobPositionSchema = new mongoose.Schema<JobPositionDocument>(
     },
     { timestamps: true }
 );
+
+// Index the location so listings can be filtered by state efficiently.
+JobPositionSchema.index({ location: 1 });
 
 // Clear model cache in Next.js development HMR
 if (mongoose.models && mongoose.models.JobPosition) {

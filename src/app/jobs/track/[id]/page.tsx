@@ -7,6 +7,7 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  Download,
   Eye,
   FileText,
   Loader2,
@@ -14,8 +15,10 @@ import {
   Save,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { DOCUMENT_METADATA, getDefaultApplicationDocuments, getDocumentLabel, requiresFileUpload } from "@/lib/documentMetadata";
+import { resolveFieldType, toDateInputValue } from "@/lib/formFields";
 import type { DocumentType } from "@/models/ApplicationDocument";
 
 interface DocumentRequirement {
@@ -26,7 +29,7 @@ interface DocumentRequirement {
 interface CustomField {
   name: string;
   label: string;
-  type: 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file';
+  type: 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file' | 'date';
   required: boolean;
   options?: string[];
 }
@@ -94,6 +97,9 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
   const [uploadedFileNames, setUploadedFileNames] = useState<Record<string, string>>({});
   const [uploadingFields, setUploadingFields] = useState<Record<string, boolean>>({});
   const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  // File currently open in the in-page viewer modal (keeps the storage URL out
+  // of the address bar / a separate tab).
+  const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null);
 
   const [clientSessionId] = useState(() => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -101,6 +107,17 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
     }
     return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   });
+
+  // Open a submitted/edited file in the viewer. Existing files are same-origin
+  // proxy refs (used as-is); a freshly uploaded file is a publicId reference,
+  // previewed through the session-scoped upload proxy. Neither exposes a storage URL.
+  const openStoredFile = (ref: string | undefined, name: string) => {
+    if (!ref) return;
+    const url = ref.startsWith('/api/')
+      ? ref
+      : `/api/upload/preview?publicId=${encodeURIComponent(ref)}&clientSessionId=${encodeURIComponent(clientSessionId)}`;
+    setViewerFile({ url, name });
+  };
 
   useEffect(() => {
     if (!email || !accessToken) {
@@ -111,6 +128,14 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
 
     void fetchDetails();
   }, [id, email, accessToken]);
+
+  // Close the file viewer on Escape.
+  useEffect(() => {
+    if (!viewerFile) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setViewerFile(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewerFile]);
 
   const fetchDetails = async () => {
     setIsLoading(true);
@@ -219,7 +244,8 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
         setDocumentUploads((prev) => ({
           ...prev,
           [documentType]: {
-            fileUrl: data.url,
+            // publicId reference (not a storage URL); the server resolves it on save.
+            fileUrl: data.public_id,
             fileName: file.name,
             publicId: data.public_id,
             deliveryMethod: 'upload',
@@ -261,7 +287,8 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
       const data = await res.json();
 
       if (res.ok) {
-        setCustomAnswers((prev) => ({ ...prev, [fieldName]: data.url }));
+        // Store the publicId reference (not a storage URL); resolved on save.
+        setCustomAnswers((prev) => ({ ...prev, [fieldName]: data.public_id }));
         setUploadedFileNames((prev) => ({ ...prev, [fieldName]: file.name }));
         if (typeof data.public_id === 'string' && data.public_id) {
           setUploadedFieldPublicIds((prev) => ({ ...prev, [fieldName]: data.public_id }));
@@ -473,20 +500,34 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                 <p className="text-sm text-text-secondary">No additional form questions were configured for this position.</p>
               ) : (
                 <div className="space-y-4">
-                  {payload.form.customFields.map((field) => (
+                  {payload.form.customFields.map((field) => {
+                    const ftype = resolveFieldType(field);
+                    return (
                     <div key={field.name} className="space-y-2">
                       <label className="text-xs font-bold text-text-secondary">
                         {field.label}
                         {field.required && <span className="text-rose-500 ml-1">*</span>}
                       </label>
 
-                      {field.type === 'text' && (
+                      {ftype === 'text' && (
                         <input
                           type="text"
                           disabled={!canEdit}
                           value={customAnswers[field.name] || ''}
                           onChange={(e) => setCustomAnswers((prev) => ({ ...prev, [field.name]: e.target.value }))}
                           className="w-full text-sm bg-bg-input border border-border-input rounded-xl px-4 py-2.5 text-text-input outline-none disabled:opacity-70"
+                        />
+                      )}
+
+                      {ftype === 'date' && (
+                        <input
+                          type="date"
+                          disabled={!canEdit}
+                          value={toDateInputValue(customAnswers[field.name])}
+                          onChange={(e) => setCustomAnswers((prev) => ({ ...prev, [field.name]: e.target.value }))}
+                          // Open the native picker on a click anywhere in the field, not just the calendar icon.
+                          onClick={(e) => { try { (e.currentTarget as any).showPicker?.(); } catch {} }}
+                          className="w-full text-sm bg-bg-input border border-border-input rounded-xl px-4 py-2.5 text-text-input outline-none disabled:opacity-70 cursor-pointer [color-scheme:light] dark:[color-scheme:dark]"
                         />
                       )}
 
@@ -556,9 +597,13 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                             <div className="flex items-center justify-between gap-3 border border-border-card rounded-xl p-3 bg-surface-card">
                               <div>
                                 <p className="text-sm font-semibold text-text-primary truncate max-w-[360px]">{uploadedFileNames[field.name] || 'Uploaded file'}</p>
-                                <a href={customAnswers[field.name]} target="_blank" rel="noreferrer" className="text-xs font-semibold text-brand-primary inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => openStoredFile(customAnswers[field.name], uploadedFileNames[field.name] || 'Uploaded file')}
+                                  className="text-xs font-semibold text-brand-primary inline-flex items-center gap-1"
+                                >
                                   <Eye className="h-3 w-3" /> View file
-                                </a>
+                                </button>
                               </div>
                               {canEdit && (
                                 <button
@@ -601,7 +646,8 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -661,9 +707,13 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                         <div className="flex items-center justify-between border border-border-card rounded-xl p-3">
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-text-primary truncate">{upload.fileName || 'Uploaded file'}</p>
-                            <a href={upload.fileUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-brand-primary inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => openStoredFile(upload.fileUrl, upload.fileName || 'Uploaded file')}
+                              className="text-xs font-semibold text-brand-primary inline-flex items-center gap-1"
+                            >
                               <Eye className="h-3 w-3" /> View file
-                            </a>
+                            </button>
                           </div>
                           {canEdit && requiresFileUpload(rule.documentType) && (
                             <button
@@ -797,6 +847,43 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
           </div>
         </div>
       )}
+
+      {/* In-page file viewer — renders the submitted file in a modal so the raw
+          storage URL never opens in the address bar / a separate tab. */}
+      {viewerFile && (() => {
+        const src = viewerFile.url || '';
+        // The proxy URL carries no extension, so detect by the stored filename.
+        // Images render in an <img>; everything else (PDF, etc.) in an <iframe>,
+        // which relies on the correct content-type the proxy streams back.
+        const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(viewerFile.name || '');
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setViewerFile(null)}>
+            <div className="w-full max-w-4xl h-[85vh] rounded-2xl border border-border-modal bg-surface-modal shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sidebar-border">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText className="h-4 w-4 text-brand-primary shrink-0" />
+                  <p className="text-sm font-bold text-text-primary truncate">{viewerFile.name}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <a href={src} download className="p-2 rounded-lg text-text-secondary hover:bg-slate-200/60 dark:hover:bg-white/[0.06] transition-colors" title="Download">
+                    <Download className="h-4 w-4" />
+                  </a>
+                  <button type="button" onClick={() => setViewerFile(null)} className="p-2 rounded-lg text-text-secondary hover:bg-slate-200/60 dark:hover:bg-white/[0.06] transition-colors" title="Close">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 bg-slate-100 dark:bg-black/40 overflow-auto flex items-center justify-center">
+                {isImage ? (
+                  <img src={src} alt={viewerFile.name} className="max-w-full max-h-full object-contain" />
+                ) : (
+                  <iframe src={src} title={viewerFile.name} className="w-full h-full border-0" />
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

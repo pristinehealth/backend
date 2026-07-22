@@ -15,6 +15,10 @@ interface JobApplication {
   createdAt: string;
 }
 
+const cooldownKey = (email: string) => `track-otp-cooldown:${email.trim().toLowerCase()}`;
+const secondsUntil = (deadline: number) =>
+  Number.isFinite(deadline) ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : 0;
+
 function TrackApplicationsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -24,6 +28,7 @@ function TrackApplicationsInner() {
   const [accessToken, setAccessToken] = useState('');
   const [isRequestingCode, setIsRequestingCode] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [isTracking, setIsTracking] = useState(false);
   const [trackError, setTrackError] = useState('');
   const [trackInfo, setTrackInfo] = useState('');
@@ -40,6 +45,31 @@ function TrackApplicationsInner() {
       void runLookup(email, token);
     }
   }, [searchParams]);
+
+  // Restore any in-flight cooldown for this email after a refresh / tab reopen.
+  // We persist an absolute deadline (not a countdown) so elapsed time stays accurate.
+  useEffect(() => {
+    if (!trackEmail) {
+      setResendCooldown(0);
+      return;
+    }
+    const raw = localStorage.getItem(cooldownKey(trackEmail));
+    setResendCooldown(raw ? secondsUntil(Number(raw)) : 0);
+  }, [trackEmail]);
+
+  // Count the resend cooldown down to zero, one tick per second.
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  const startCooldown = (seconds: number) => {
+    localStorage.setItem(cooldownKey(trackEmail), String(Date.now() + seconds * 1000));
+    setResendCooldown(seconds);
+  };
 
   const runLookup = async (emailInput: string, tokenInput: string) => {
     setIsTracking(true);
@@ -69,7 +99,7 @@ function TrackApplicationsInner() {
   };
 
   const handleRequestCode = async () => {
-    if (!trackEmail) return;
+    if (!trackEmail || resendCooldown > 0) return;
 
     setIsRequestingCode(true);
     setTrackError('');
@@ -84,11 +114,17 @@ function TrackApplicationsInner() {
 
       const data = await res.json();
       if (!res.ok) {
+        // Honor the server's cooldown so the button stays locked until it lifts.
+        if (res.status === 429) {
+          const retryAfter = Number(res.headers.get('Retry-After'));
+          startCooldown(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 60);
+        }
         setTrackError(data.error || 'Failed to send verification code.');
         return;
       }
 
       setCodeSent(true);
+      startCooldown(60);
       setTrackInfo('Verification code sent. Check your email.');
     } catch (error) {
       console.error(error);
@@ -172,10 +208,18 @@ function TrackApplicationsInner() {
               <button
                 type="button"
                 onClick={handleRequestCode}
-                disabled={isRequestingCode || !trackEmail}
-                className="bg-brand-primary hover:bg-brand-primary-dark disabled:opacity-60 text-white font-bold text-sm px-5 py-2.5 rounded-xl flex items-center justify-center gap-2"
+                disabled={isRequestingCode || !trackEmail || resendCooldown > 0}
+                className="bg-brand-primary hover:bg-brand-primary-dark disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-sm px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 whitespace-nowrap"
               >
-                {isRequestingCode ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send code'}
+                {isRequestingCode ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : resendCooldown > 0 ? (
+                  `Resend in ${resendCooldown}s`
+                ) : codeSent ? (
+                  'Resend code'
+                ) : (
+                  'Send code'
+                )}
               </button>
             </div>
 

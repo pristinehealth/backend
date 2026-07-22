@@ -32,6 +32,7 @@ import {
   useGetRequirementsQuery,
   useStaffComplianceActionMutation,
 } from "@/lib/features/api/complianceApi";
+import { sanitizeMetadataValue, metadataValueError, metadataInputProps } from "@/lib/documentMetadata";
 
 interface StaffRow {
   staffId: string;
@@ -258,6 +259,7 @@ function StaffComplianceDetail({ row, onClose }: { row: StaffRow; onClose: () =>
     try {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("source", "admin");
       fd.append("usageType", "supporting_document");
       const up = await fetch("/api/upload", { method: "POST", body: fd });
       const upData = await up.json();
@@ -371,7 +373,9 @@ function StaffComplianceDetail({ row, onClose }: { row: StaffRow; onClose: () =>
                   <div className="flex flex-wrap items-center gap-2">
                     {/* Evidence link/state */}
                     {card.evidence?.fileUrl ? (
-                      <a href={card.evidence.fileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold text-brand-primary hover:text-brand-primary-dark">
+                      // Route through the admin file proxy so private (authenticated)
+                      // assets are signed server-side; public assets pass through.
+                      <a href={`/api/admin/file?src=${encodeURIComponent(card.evidence.fileUrl)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-bold text-brand-primary hover:text-brand-primary-dark">
                         <Eye className="h-3.5 w-3.5" /> Evidence
                       </a>
                     ) : card.evidence?.reference ? (
@@ -397,22 +401,27 @@ function StaffComplianceDetail({ row, onClose }: { row: StaffRow; onClose: () =>
                         <input
                           type="text"
                           value={metadataDrafts[card.requirementKey] ?? ""}
-                          onChange={(e) => setMetadataDrafts((p) => ({ ...p, [card.requirementKey]: e.target.value }))}
-                          placeholder="Reference / value (no file stored)"
+                          onChange={(e) => setMetadataDrafts((p) => ({ ...p, [card.requirementKey]: sanitizeMetadataValue(card.requirementKey, e.target.value) }))}
+                          placeholder={metadataInputProps(card.requirementKey).placeholder || "Reference / value (no file stored)"}
+                          inputMode={metadataInputProps(card.requirementKey).inputMode}
+                          maxLength={metadataInputProps(card.requirementKey).maxLength}
                           className="ui-input w-56 py-1"
                         />
                         <button
                           type="button"
                           disabled={busy}
-                          onClick={() =>
+                          onClick={() => {
+                            const val = (metadataDrafts[card.requirementKey] || "").trim();
+                            const fmtError = metadataValueError(card.requirementKey, val);
+                            if (fmtError) { setError(fmtError); return; }
                             doAction(card.requirementKey, "add_evidence", {
                               evidence: {
-                                reference: (metadataDrafts[card.requirementKey] || "").trim(),
+                                reference: val,
                                 deliveryMethod: "manual",
                                 source: "admin_metadata_record",
                               },
-                            })
-                          }
+                            });
+                          }}
                           className="inline-flex items-center gap-1 rounded-lg ui-card-soft text-xs font-bold px-2.5 py-1.5 disabled:opacity-50"
                           title="Record this reference (no file is stored)"
                         >
@@ -441,9 +450,35 @@ function StaffComplianceDetail({ row, onClose }: { row: StaffRow; onClose: () =>
                       </span>
                     )}
 
-                    {card.assignedManually && (
-                      <button type="button" disabled={busy} onClick={() => doAction(card.requirementKey, "unassign")} className="inline-flex items-center gap-1 rounded-lg text-text-muted hover:text-rose-400 text-xs font-bold px-2 py-1.5 disabled:opacity-50 ml-auto" title="Remove manual assignment">
-                        <Trash2 className="h-3.5 w-3.5" />
+                    {card.assignedManually ? (
+                      // Manually-attached → a real delete (it won't re-appear).
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          if (confirm(`Delete "${card.label}" from this staff member? Any recorded value is removed. Their submitted document (if any) stays on their application.`)) {
+                            doAction(card.requirementKey, "unassign");
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg text-text-muted hover:text-rose-400 text-xs font-bold px-2 py-1.5 disabled:opacity-50 ml-auto"
+                        title="Delete this requirement from this staff member"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
+                      </button>
+                    ) : (
+                      // Mandatory/catalog → exempt (a delete would just re-derive it).
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          if (confirm(`Exempt this staff member from "${card.label}"? It will be hidden and no longer counted for them only (not for others). To retire it for everyone, deactivate it in Requirements.`)) {
+                            doAction(card.requirementKey, "exempt");
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg text-text-muted hover:text-amber-400 text-xs font-bold px-2 py-1.5 disabled:opacity-50 ml-auto"
+                        title="Exempt this staff member from this requirement"
+                      >
+                        <EyeOff className="h-3.5 w-3.5" /> Exempt
                       </button>
                     )}
                   </div>

@@ -63,9 +63,18 @@ export async function POST(request: Request) {
         const arrayBuffer = await file.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
-        // Position images live in their own Cloudinary folder.
+        // Position images live in their own Cloudinary folder and stay public
+        // (shown directly on careers pages). Applicant files can be stored as
+        // 'authenticated' (raw URL not publicly reachable) once every surface
+        // that views them goes through a signing proxy — gated by an env flag so
+        // it defaults to today's public behavior and can be switched on safely.
+        // Admin uploads (source 'admin') stay public and get their URL back;
+        // everything else is an applicant upload (job_apply, job_track_edit, …).
+        const isAdminUpload = source === 'admin';
+        const privateApplicantFiles = process.env.CLOUDINARY_PRIVATE_APPLICANT_FILES === 'true';
         const folder = isPositionImage ? 'pristine/job-images' : 'pristine/applications';
-        const uploadResult = await uploadBuffer(buffer, folder, file.name);
+        const deliveryType = (!isAdminUpload && privateApplicantFiles) ? 'authenticated' : 'upload';
+        const uploadResult = await uploadBuffer(buffer, folder, file.name, deliveryType);
 
         // Track file so abandoned uploads can be cleaned if the application is never submitted.
         try {
@@ -98,10 +107,13 @@ export async function POST(request: Request) {
             console.error('[Upload Route] Failed to track pending upload:', trackingError);
         }
 
+        // Applicant uploads get back only a publicId — never the raw storage URL
+        // (the server resolves it at submit time). Admin uploads still receive
+        // the URL, since they are shown directly and are not applicant-private.
         return NextResponse.json({
             message: 'File uploaded successfully',
-            url: uploadResult.url,
-            public_id: uploadResult.public_id
+            public_id: uploadResult.public_id,
+            ...(isAdminUpload ? { url: uploadResult.url } : {}),
         }, { status: 200 });
 
     } catch (error: any) {

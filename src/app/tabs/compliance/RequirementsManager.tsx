@@ -101,7 +101,7 @@ export function RequirementsManager() {
   const [positions, setPositions] = useState<Position[]>([]);
 
   useEffect(() => {
-    fetch("/api/admin/jobs")
+    fetch("/api/admin/jobs?limit=0")
       .then((r) => r.json())
       .then((jobsData) => {
         const list = Array.isArray(jobsData) ? jobsData : Array.isArray(jobsData?.data) ? jobsData.data : [];

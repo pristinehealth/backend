@@ -15,7 +15,8 @@ export type ComplianceEventType =
   | 'reminder_sent'
   | 'migrated'
   | 'archived'
-  | 'disposed';
+  | 'disposed'
+  | 'exempted';
 
 export interface ComplianceEventDoc extends mongoose.Document {
   recordId: mongoose.Types.ObjectId;
@@ -35,7 +36,7 @@ const ComplianceEventSchema = new mongoose.Schema<ComplianceEventDoc>(
     },
     eventType: {
       type: String,
-      enum: ['record_created', 'evidence_added', 'verified', 'rejected', 'expiry_set', 'reminder_sent', 'migrated', 'archived', 'disposed'],
+      enum: ['record_created', 'evidence_added', 'verified', 'rejected', 'expiry_set', 'reminder_sent', 'migrated', 'archived', 'disposed', 'exempted'],
       required: true,
     },
     actor: { type: String, required: true },
@@ -47,12 +48,12 @@ const ComplianceEventSchema = new mongoose.Schema<ComplianceEventDoc>(
 
 ComplianceEventSchema.index({ recordId: 1, createdAt: -1 });
 
-// Recompile a stale cached model whose eventType enum predates 'disposed' /
-// 'archived' so the widened enum registers (dev HMR keeps the old model).
+// Recompile a stale cached model whose eventType enum predates the newest values
+// (e.g. 'exempted') so the widened enum registers (dev HMR keeps the old model).
 const cachedEvent = mongoose.models.ComplianceEvent as mongoose.Model<ComplianceEventDoc> | undefined;
 if (cachedEvent) {
   const enumValues = (cachedEvent.schema.path('eventType') as any)?.enumValues as string[] | undefined;
-  if (!Array.isArray(enumValues) || !enumValues.includes('disposed')) {
+  if (!Array.isArray(enumValues) || !enumValues.includes('exempted')) {
     delete (mongoose.models as Record<string, unknown>).ComplianceEvent;
   }
 }

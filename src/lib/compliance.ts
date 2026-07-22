@@ -355,12 +355,17 @@ export async function buildComplianceView(opts: {
 
   // The requirements to render: targeted ones ∪ any a record already exists for
   // (manual assignments and historical records survive even if de-targeted).
+  // Requirements the admin exempted for this staff member are hidden and not
+  // counted — even if role/position targeting would otherwise apply them.
+  const exemptedKeys = new Set((records as any[]).filter((r) => r.exempted).map((r) => r.requirementKey));
   const keys: string[] = [];
   const seen = new Set<string>();
   for (const d of applicable) {
+    if (exemptedKeys.has(d.key)) continue;
     if (!seen.has(d.key)) { seen.add(d.key); keys.push(d.key); }
   }
   for (const r of records as any[]) {
+    if (r.exempted) continue;
     if (!seen.has(r.requirementKey)) { seen.add(r.requirementKey); keys.push(r.requirementKey); }
   }
 
@@ -510,7 +515,7 @@ export async function computeStaffComplianceSummaries(
 
   const [allDefs, records] = await Promise.all([
     getAllRequirementDefinitions(),
-    StaffComplianceRecord.find({ staffId: { $in: staffIds } }).select('staffId requirementKey status expiryDate verifiedAt').lean(),
+    StaffComplianceRecord.find({ staffId: { $in: staffIds } }).select('staffId requirementKey status expiryDate verifiedAt exempted').lean(),
   ]);
 
   const activeDefs = allDefs.filter((d) => d.active);
@@ -529,8 +534,8 @@ export async function computeStaffComplianceSummaries(
     const recMap = recordsByStaff.get(sid);
 
     const keys = new Set<string>();
-    for (const d of activeDefs) if (isTargeted(d, s.positionId)) keys.add(d.key);
-    if (recMap) for (const k of recMap.keys()) keys.add(k);
+    for (const d of activeDefs) if (isTargeted(d, s.positionId) && !recMap?.get(d.key)?.exempted) keys.add(d.key);
+    if (recMap) for (const [k, rec] of recMap) if (!rec.exempted) keys.add(k);
 
     let verified = 0, pending = 0, expired = 0, rejected = 0, missing = 0, mandatoryMissing = 0;
 

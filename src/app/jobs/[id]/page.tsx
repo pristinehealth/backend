@@ -4,6 +4,7 @@ import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Briefcase, Loader2, Moon, Sun, Clock, ShieldCheck, MapPin, CheckCircle2, Sparkles } from "lucide-react";
+import { formatLocation } from "@/lib/usStates";
 
 interface JobSection {
   label: string;
@@ -13,6 +14,8 @@ interface JobSection {
 interface JobPosition {
   _id: string;
   title: string;
+  location?: string | null;
+  city?: string | null;
   sections: JobSection[];
   status: 'open' | 'closed';
   imageUrl?: string | null;
@@ -134,7 +137,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-text-muted">
               <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-brand-primary" /> Credentialed role</span>
               <span className="flex items-center gap-2"><Clock className="h-4 w-4 text-brand-primary" /> Posted {new Date(job.createdAt).toLocaleDateString()}</span>
-              <span className="flex items-center gap-2"><MapPin className="h-4 w-4 text-brand-primary" /> Washington State</span>
+              <span className="flex items-center gap-2"><MapPin className="h-4 w-4 text-brand-primary" /> {formatLocation(job.city, job.location) || 'Multi-State'}</span>
             </div>
           </div>
         </div>

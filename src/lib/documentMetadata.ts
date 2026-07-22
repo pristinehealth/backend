@@ -117,6 +117,31 @@ export function getDocumentLabel(docType: DocumentType): string {
   return DOCUMENT_METADATA[docType]?.label || docType;
 }
 
+// ── Metadata-only value constraints ──────────────────────────────────────────
+// Some metadata-only documents have a strict format for their typed value.
+// SSN: digits only, exactly 9. Kept here so every input (apply form, track edit,
+// admin compliance) enforces the same rule.
+
+/** Strip a typed metadata value to its allowed characters as the user types. */
+export function sanitizeMetadataValue(docType: DocumentType, raw: string): string {
+  if (docType === 'ssn') return raw.replace(/\D/g, '').slice(0, 9);
+  return raw;
+}
+
+/** Validation error for a typed metadata value, or null if valid. */
+export function metadataValueError(docType: DocumentType, value: string): string | null {
+  if (docType === 'ssn' && value.trim()) {
+    if (!/^\d{9}$/.test(value.trim())) return 'SSN must be exactly 9 digits.';
+  }
+  return null;
+}
+
+/** Input attributes (inputMode / maxLength / placeholder) for a metadata value field. */
+export function metadataInputProps(docType: DocumentType): { inputMode?: 'numeric'; maxLength?: number; placeholder?: string } {
+  if (docType === 'ssn') return { inputMode: 'numeric', maxLength: 9, placeholder: '9-digit SSN' };
+  return {};
+}
+
 export function isMandatory(docType: DocumentType): boolean {
   return DOCUMENT_METADATA[docType]?.mandatory ?? false;
 }
