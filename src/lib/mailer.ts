@@ -62,6 +62,61 @@ export async function sendContactEmail(input: {
     console.log(`[Mailer] Contact inquiry from ${email} delivered to ${CONTACT_INBOX}`);
 }
 
+/**
+ * Notify the admin/recruiting inbox that a new job application was submitted.
+ * Recipient: ADMIN_NOTIFICATION_EMAIL, falling back to the support/contact inbox.
+ * Best-effort — callers should not let a mail failure block the submission.
+ */
+export async function sendNewApplicationAdminEmail(input: {
+    applicantName: string;
+    applicantEmail: string;
+    jobTitle: string;
+    applicationId: string;
+}) {
+    const { applicantName, applicantEmail, jobTitle, applicationId } = input;
+    const to = process.env.ADMIN_NOTIFICATION_EMAIL || CONTACT_INBOX;
+
+    if (!process.env.RESEND_API_KEY) {
+        console.log(`\n========== [DEV] New application ==========`);
+        console.log(`Applicant: ${applicantName} <${applicantEmail}>`);
+        console.log(`Position: ${jobTitle}`);
+        console.log(`Recipient: ${to}`);
+        console.log(`===========================================\n`);
+        return;
+    }
+
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const base = (process.env.PUBLIC_BASE_URL || process.env.NEXTAUTH_URL || '').replace(/\/$/, '');
+    const reviewUrl = base ? `${base}/dashboard?tab=jobs` : '';
+
+    const { error } = await resend.emails.send({
+        from: `Pristine Careers <${FROM}>`,
+        to,
+        replyTo: applicantEmail,
+        subject: `New application: ${jobTitle} — ${applicantName}`,
+        text: `A new job application was submitted.\n\nApplicant: ${applicantName}\nEmail: ${applicantEmail}\nPosition: ${jobTitle}\nApplication ID: ${applicationId}${reviewUrl ? `\n\nReview: ${reviewUrl}` : ''}`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                <h2 style="color: #3B6BB5;">New Job Application</h2>
+                <table style="width: 100%; font-size: 14px; color: #111827; border-collapse: collapse;">
+                    <tr><td style="padding: 6px 0; color: #6b7280; width: 90px;">Applicant</td><td style="padding: 6px 0; font-weight: bold;">${esc(applicantName)}</td></tr>
+                    <tr><td style="padding: 6px 0; color: #6b7280;">Email</td><td style="padding: 6px 0;"><a href="mailto:${esc(applicantEmail)}">${esc(applicantEmail)}</a></td></tr>
+                    <tr><td style="padding: 6px 0; color: #6b7280;">Position</td><td style="padding: 6px 0;">${esc(jobTitle)}</td></tr>
+                </table>
+                ${reviewUrl ? `<div style="margin: 22px 0;"><a href="${reviewUrl}" style="display: inline-block; background-color: #3B6BB5; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 12px 22px; border-radius: 8px;">Review in dashboard</a></div>` : ''}
+                <p style="color: #9ca3af; font-size: 12px; margin-top: 16px;">Reply to this email to contact the applicant directly.</p>
+            </div>
+        `,
+    });
+
+    if (error) {
+        console.error(`[Mailer] Resend error sending new-application notice:`, error);
+        throw new Error(`Failed to send email: ${error.message}`);
+    }
+
+    console.log(`[Mailer] New application notice for ${applicantEmail} delivered to ${to}`);
+}
+
 export async function sendOtpEmail(to: string, code: string, name: string, purpose: OtpPurpose = 'reset') {
     const apiKey = process.env.RESEND_API_KEY;
 
@@ -202,7 +257,8 @@ export async function sendApplicationStatusChangeEmail(
     to: string,
     name: string,
     jobTitle: string,
-    status: ApplicationStatus
+    status: ApplicationStatus,
+    trackingUrl?: string
 ) {
     const apiKey = process.env.RESEND_API_KEY;
     const statusLabel = statusLabelMap[status] || status;
@@ -212,15 +268,29 @@ export async function sendApplicationStatusChangeEmail(
         console.log(`[DEV] Application Status Update for ${to}`);
         console.log(`JOB: ${jobTitle}`);
         console.log(`STATUS: ${statusLabel}`);
+        if (trackingUrl) console.log(`ACCESS LINK: ${trackingUrl}`);
         console.log(`========================================\n`);
         return;
     }
+
+    // One-click access link (valid 7 days) so applicants can open their
+    // application straight from the email without requesting a new code.
+    const ctaHtml = trackingUrl
+        ? `<div style="margin: 22px 0;">
+                <a href="${trackingUrl}" style="display: inline-block; background-color: #3B6BB5; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 12px 22px; border-radius: 8px;">View your application</a>
+            </div>
+            <p style="color: #666; font-size: 12px;">This secure link is unique to you and expires in 7 days. If it expires, you can still track your application anytime from the candidate portal using your email and a one-time code.</p>`
+        : `<p style="color: #666; font-size: 12px;">You can continue tracking your application from the candidate portal using your email and access code.</p>`;
+
+    const ctaText = trackingUrl
+        ? `\n\nView your application (secure link, expires in 7 days):\n${trackingUrl}`
+        : '';
 
     const { error } = await resend.emails.send({
         from: `Pristine Staffing <${FROM}>`,
         to,
         subject: `Application Update: ${jobTitle} (${statusLabel})`,
-        text: `Hello ${name},\n\nYour application for ${jobTitle} has been updated to: ${statusLabel}.\n\nBest regards,\nPristine Staffing Team`,
+        text: `Hello ${name},\n\nYour application for ${jobTitle} has been updated to: ${statusLabel}.${ctaText}\n\nBest regards,\nPristine Staffing Team`,
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
                 <h2 style="color: #3B6BB5;">Pristine Application Update</h2>
@@ -230,7 +300,7 @@ export async function sendApplicationStatusChangeEmail(
                     <p style="margin: 0; color: #4B5563; font-size: 12px;">Current Status</p>
                     <p style="margin: 6px 0 0 0; color: #111827; font-weight: 700; font-size: 20px;">${statusLabel}</p>
                 </div>
-                <p style="color: #666; font-size: 12px;">You can continue tracking your application from the candidate portal using your email and access code.</p>
+                ${ctaHtml}
             </div>
         `,
     });

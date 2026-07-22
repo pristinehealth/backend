@@ -8,8 +8,18 @@ import Staff from '@/models/Staff';
 import Settings from '@/models/Settings';
 import { sendApplicationStatusChangeEmail } from '@/lib/mailer';
 import { linkApplicationDocumentsToStaff } from '@/lib/documentHelpers';
+import { createApplicationAccessLinkToken } from '@/lib/applicationAccess';
 
 export const dynamic = 'force-dynamic';
+
+// Deep link straight to this application, pre-authenticated with a signed
+// access token so the applicant lands on it without requesting a new code.
+function buildTrackingUrl(applicationId: string, email: string): string | undefined {
+    const token = createApplicationAccessLinkToken(email);
+    if (!token) return undefined;
+    const base = (process.env.PUBLIC_BASE_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000').replace(/\/$/, '');
+    return `${base}/jobs/track/${applicationId}?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`;
+}
 
 async function isAdmin() {
     const session = await getServerSession(authOptions);
@@ -68,7 +78,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
                     application.applicantEmail,
                     application.applicantName,
                     job?.title || 'Job Position',
-                    status
+                    status,
+                    buildTrackingUrl(String(application._id), application.applicantEmail)
                 );
                 console.log('[Admin Application Status] Notification sent', {
                     id,

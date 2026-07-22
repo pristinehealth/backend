@@ -13,6 +13,12 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Pristine CRM & Careers",
   description: "Management Portal and Applicant Tracking System",
+  // Swap public/favicon.png for the white Pristine logo (square, transparent bg).
+  icons: {
+    icon: "/favicon.png",
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
+  },
 };
 
 export default function RootLayout({

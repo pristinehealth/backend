@@ -17,6 +17,7 @@ export function SettingsTab() {
     const [isSavingSchedule, setIsSavingSchedule] = useState(false);
     const [notifyStatusChange, setNotifyStatusChange] = useState(true);
     const [notifyReviewerNotes, setNotifyReviewerNotes] = useState(true);
+    const [notifyNewApplication, setNotifyNewApplication] = useState(true);
     const [isSavingNotifications, setIsSavingNotifications] = useState(false);
 
     // Fetch initial cron status and notification preferences on mount
@@ -40,6 +41,7 @@ export function SettingsTab() {
                 if (settingsData.settings) {
                     setNotifyStatusChange(settingsData.settings['app_notify_status_change'] !== 'false');
                     setNotifyReviewerNotes(settingsData.settings['app_notify_reviewer_notes'] !== 'false');
+                    setNotifyNewApplication(settingsData.settings['app_notify_new_application'] !== 'false');
                 }
             })
             .catch(err => console.error("Failed to fetch settings:", err));
@@ -53,7 +55,8 @@ export function SettingsTab() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     app_notify_status_change: String(notifyStatusChange),
-                    app_notify_reviewer_notes: String(notifyReviewerNotes)
+                    app_notify_reviewer_notes: String(notifyReviewerNotes),
+                    app_notify_new_application: String(notifyNewApplication)
                 })
             });
             if (res.ok) {
@@ -329,6 +332,28 @@ export function SettingsTab() {
                     </p>
 
                     <div className="space-y-3">
+                        <div className="flex justify-between items-center bg-slate-100 dark:bg-black/25 border border-sidebar-border p-3.5 rounded-xl">
+                            <div>
+                                <span className="text-xs font-bold text-text-primary block">New Application Emails</span>
+                                <span className="text-[10px] text-text-muted mt-0.5 block">Notify the admin inbox when a candidate submits a new application.</span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setNotifyNewApplication(!notifyNewApplication)}
+                                className={cn(
+                                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                                    notifyNewApplication ? "bg-emerald-500" : "bg-slate-400"
+                                )}
+                            >
+                                <span
+                                    className={cn(
+                                        "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                                        notifyNewApplication ? "translate-x-6" : "translate-x-1"
+                                    )}
+                                />
+                            </button>
+                        </div>
+
                         <div className="flex justify-between items-center bg-slate-100 dark:bg-black/25 border border-sidebar-border p-3.5 rounded-xl">
                             <div>
                                 <span className="text-xs font-bold text-text-primary block">Status Change Emails</span>

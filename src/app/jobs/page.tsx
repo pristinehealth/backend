@@ -7,6 +7,7 @@ import {
     Briefcase, ChevronRight, Loader2,
     Lock, Moon, Sun, ChevronLeft, ArrowRight, MapPin, Clock, ShieldCheck, Sparkles
 } from "lucide-react";
+import { formatLocation } from "@/lib/usStates";
 
 interface CustomField {
     name: string;
@@ -24,6 +25,8 @@ interface JobSection {
 interface JobPosition {
     _id: string;
     title: string;
+    location?: string | null;
+    city?: string | null;
     sections: JobSection[];
     status: 'open' | 'closed';
     customFields: CustomField[];
@@ -39,9 +42,6 @@ export default function CareersPage() {
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
-
-    // Track application status states
-    const [trackEmail, setTrackEmail] = useState("");
 
     const [theme, setTheme] = useState<'light' | 'dark'>('dark');
 
@@ -74,13 +74,6 @@ export default function CareersPage() {
         } finally {
             setIsLoading(false);
         }
-    };
-
-    const handleTrackSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!trackEmail) return;
-
-        router.push(`/jobs/track?email=${encodeURIComponent(trackEmail)}`);
     };
 
     // Pagination calculations
@@ -148,7 +141,7 @@ export default function CareersPage() {
                         <div className="flex flex-wrap gap-x-6 gap-y-2 pt-1 text-sm text-text-muted">
                             <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-brand-primary" /> Credentialed & compliant</span>
                             <span className="flex items-center gap-2"><Clock className="h-4 w-4 text-brand-primary" /> Flexible shifts</span>
-                            <span className="flex items-center gap-2"><MapPin className="h-4 w-4 text-brand-primary" /> Washington State</span>
+                            <span className="flex items-center gap-2"><MapPin className="h-4 w-4 text-brand-primary" /> Multi-State</span>
                         </div>
                     </div>
                 </div>
@@ -196,7 +189,12 @@ export default function CareersPage() {
                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">Open</span>
                                         </div>
                                         <p className="text-xs text-text-secondary line-clamp-2 leading-relaxed">{job.sections?.[0]?.content}</p>
-                                        <span className="inline-block text-[10px] text-text-muted font-mono">Posted {new Date(job.createdAt).toLocaleDateString()}</span>
+                                        <div className="flex items-center gap-3 flex-wrap">
+                                            {formatLocation(job.city, job.location) && (
+                                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-brand-primary"><MapPin className="h-3 w-3" /> {formatLocation(job.city, job.location)}</span>
+                                            )}
+                                            <span className="inline-block text-[10px] text-text-muted font-mono">Posted {new Date(job.createdAt).toLocaleDateString()}</span>
+                                        </div>
                                     </div>
                                     <span className="hidden sm:inline-flex items-center gap-1 text-xs font-bold text-brand-primary opacity-0 group-hover:opacity-100 -translate-x-1 group-hover:translate-x-0 transition-all shrink-0">
                                         View <ArrowRight className="h-4 w-4" />
@@ -235,24 +233,11 @@ export default function CareersPage() {
                             <h3 className="font-black text-sm text-text-primary">Track your application</h3>
                         </div>
                         <p className="text-xs text-text-muted leading-relaxed mb-5">
-                            Enter your email to receive a one-time verification code and securely access your applications.
+                            Already applied? Securely access your applications with a one-time verification code sent to your email.
                         </p>
-                        <form onSubmit={handleTrackSubmit} className="space-y-4">
-                            <div className="space-y-1.5">
-                                <label className="text-[10px] font-bold ui-muted uppercase tracking-wider">Your Email</label>
-                                <input
-                                    type="email"
-                                    required
-                                    value={trackEmail}
-                                    onChange={e => setTrackEmail(e.target.value)}
-                                    placeholder="jane.doe@example.com"
-                                    className="w-full text-xs bg-bg-input border border-border-input rounded-xl px-3.5 py-2.5 text-text-input outline-none focus:border-brand-primary transition-colors"
-                                />
-                            </div>
-                            <button type="submit" className="w-full bg-brand-primary hover:bg-brand-primary-dark text-white font-bold text-xs py-2.5 rounded-xl shadow-md shadow-brand-primary/10 active:scale-[0.98] transition-all flex justify-center items-center gap-1.5">
-                                Continue Securely <ArrowRight className="h-3.5 w-3.5" />
-                            </button>
-                        </form>
+                        <Link href="/jobs/track" className="w-full bg-brand-primary hover:bg-brand-primary-dark text-white font-bold text-xs py-2.5 rounded-xl shadow-md shadow-brand-primary/10 active:scale-[0.98] transition-all flex justify-center items-center gap-1.5">
+                            Track Application <ArrowRight className="h-3.5 w-3.5" />
+                        </Link>
                     </div>
                 </div>
             </main>

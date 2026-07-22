@@ -6,16 +6,17 @@ import {
     Briefcase, Plus, ToggleLeft, ToggleRight, Loader2, Eye, 
     Calendar, CheckCircle, XCircle, AlertCircle, FileText, User, 
     Mail, MessageSquare, Send, Check, Trash2, X, ListTodo, Info, HelpCircle, Edit, ClipboardList,
-    ChevronLeft, ChevronRight, Download
+    ChevronLeft, ChevronRight, Download, MapPin
 } from "lucide-react";
 import { downloadApplicationPdf, toApplicationPdfData } from "@/lib/pdf/application";
 import type { DocumentType } from "@/models/ApplicationDocument";
 import { DOCUMENT_METADATA, getDefaultApplicationDocuments, getDocumentLabel, requiresFileUpload, usesMetadataOnlyStorage } from "@/lib/documentMetadata";
+import { LOCATION_OPTIONS, formatLocation } from "@/lib/usStates";
 
 interface CustomField {
     name: string;
     label: string;
-    type: 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file';
+    type: 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file' | 'date';
     required: boolean;
     options?: string[];
     section?: string;
@@ -46,6 +47,8 @@ interface JobSection {
 interface JobPosition {
     _id: string;
     title: string;
+    location?: string | null;
+    city?: string | null;
     sections: JobSection[];
     status: 'draft' | 'open' | 'closed';
     formId?: string;
@@ -107,7 +110,7 @@ interface ApplicationDocument {
 const DEFAULT_FORM_FIELDS: CustomField[] = [
     { name: 'first_name', label: 'First Name', type: 'text', required: true, section: 'Personal details' },
     { name: 'last_name', label: 'Last Name', type: 'text', required: true, section: 'Personal details' },
-    { name: 'birth_date', label: 'Birth Date (MM/DD/YYYY)', type: 'text', required: true, section: 'Personal details' },
+    { name: 'birth_date', label: 'Birth Date', type: 'date', required: true, section: 'Personal details' },
     { name: 'phone', label: 'Phone', type: 'text', required: true, section: 'Personal details' },
     { name: 'address', label: 'Address', type: 'text', required: true, section: 'Personal details' },
     { name: 'city', label: 'City', type: 'text', required: true, section: 'Personal details' },
@@ -133,11 +136,22 @@ const DEFAULT_FORM_FIELDS: CustomField[] = [
     },
     {
         name: 'employment_type',
-        label: 'Employment Type',
+        label: 'Preferred Employment Type',
         type: 'select',
         required: true,
         section: 'Employment details',
-        options: ['Contract', 'Per Diem', 'Locum Tenens', 'Other'],
+        options: [
+            'Full-Time W-2 – Regular employees working a standard weekly schedule and eligible for applicable benefits.',
+            'Part-Time W-2 – Employees working fewer hours than full-time, often on a recurring schedule.',
+            'Per Diem / PRN W-2 – Employees who accept shifts as needed without guaranteed weekly hours.',
+            'Temporary W-2 – Employees hired for a limited assignment, seasonal need, or defined period.',
+            'Contract Assignment W-2 – Employees assigned to a specific facility, client, project, or contract for a set duration.',
+            'Travel Contract W-2 – Healthcare professionals working temporary assignments outside their usual service area, potentially with travel or housing stipends.',
+            'Temp-to-Hire – Workers initially placed on a temporary basis with the possibility of permanent employment.',
+            'Independent Contractor / 1099 – Self-employed professionals engaged for defined services when the role legally qualifies for contractor classification.',
+            'On-Call – Staff available to cover urgent, short-notice, weekend, overnight, or call-out shifts.',
+            'Internship or Training Position – Individuals completing supervised educational or professional development assignments.',
+        ],
     },
     {
         name: 'earliest_start_date',
@@ -190,6 +204,8 @@ export function JobsTab() {
 
     // Job pagination state
     const [jobsPage, setJobsPage] = useState(1);
+    const [jobsTotal, setJobsTotal] = useState(0);
+    const [jobStateFilter, setJobStateFilter] = useState("");
     const jobsLimit = 10;
 
     // Modals
@@ -204,16 +220,25 @@ export function JobsTab() {
     const [isLoadingApplicationDocuments, setIsLoadingApplicationDocuments] = useState(false);
     const [applicationDocumentsError, setApplicationDocumentsError] = useState("");
     const [uploadingAdminDocumentType, setUploadingAdminDocumentType] = useState<DocumentType | null>(null);
-    const [recordingMetadataDocType, setRecordingMetadataDocType] = useState<DocumentType | null>(null);
     
     // Custom Confirm & Alert Dialog States
     const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; type: 'job' | 'form' | 'application'; message: string } | null>(null);
     const [customAlert, setCustomAlert] = useState<{ title: string; message: string } | null>(null);
     const [statusConfirm, setStatusConfirm] = useState<{ id: string; status: JobApplication['status']; label: string } | null>(null);
     const [isExportingPdf, setIsExportingPdf] = useState(false);
+    // File open in the in-page viewer modal (streamed via the admin file proxy).
+    const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null);
+
+    // Open a stored file in the viewer, routed through the admin proxy so private
+    // (authenticated) assets are signed server-side and public ones pass through.
+    const openAdminFile = (fileUrl: string, name: string) => {
+        setViewerFile({ url: `/api/admin/file?src=${encodeURIComponent(fileUrl)}`, name });
+    };
 
     // New/Edit Job Form State
     const [newJobTitle, setNewJobTitle] = useState("");
+    const [newJobLocation, setNewJobLocation] = useState("");
+    const [newJobCity, setNewJobCity] = useState("");
     const [newJobSections, setNewJobSections] = useState<JobSection[]>([]);
     // Optional hero image for the position (shown on the public detail page).
     const [newJobImageUrl, setNewJobImageUrl] = useState<string | null>(null);
@@ -265,7 +290,8 @@ export function JobsTab() {
 
     useEffect(() => {
         fetchData();
-    }, [subTab]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [subTab, jobStateFilter, jobsPage]);
 
     // Load applications once for the "Applications Received" badge, regardless of
     // which sub-tab is active.
@@ -280,14 +306,18 @@ export function JobsTab() {
         if (!selectedApplication) return;
 
         const handleEsc = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                setSelectedApplication(null);
+            if (event.key !== 'Escape') return;
+            // If the file viewer is open, Escape closes it first (not the whole modal).
+            if (viewerFile) {
+                setViewerFile(null);
+                return;
             }
+            setSelectedApplication(null);
         };
 
         window.addEventListener('keydown', handleEsc);
         return () => window.removeEventListener('keydown', handleEsc);
-    }, [selectedApplication]);
+    }, [selectedApplication, viewerFile]);
 
     const loadApplicationDocuments = async (applicationId: string, signal?: AbortSignal) => {
         const res = await fetch(`/api/applications/${applicationId}/documents`, { signal });
@@ -366,40 +396,6 @@ export function JobsTab() {
         }
     };
 
-    const handleRecordMetadataDocument = async (documentType: DocumentType) => {
-        if (!selectedApplication) return;
-
-        setRecordingMetadataDocType(documentType);
-        try {
-            const res = await fetch(`/api/admin/applications/${selectedApplication._id}/documents/record`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    documentType,
-                    deliveryMethod: 'email',
-                }),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                setCustomAlert({
-                    title: 'Error',
-                    message: data?.error || 'Failed to record metadata-only document.',
-                });
-                return;
-            }
-
-            await loadApplicationDocuments(selectedApplication._id);
-        } catch (err) {
-            console.error(err);
-            setCustomAlert({
-                title: 'Error',
-                message: 'Failed to record metadata-only document.',
-            });
-        } finally {
-            setRecordingMetadataDocType(null);
-        }
-    };
-
     const fetchData = async () => {
         setIsLoading(true);
         try {
@@ -410,18 +406,14 @@ export function JobsTab() {
             setForms(loadedForms);
 
             if (subTab === 'positions') {
-                const res = await fetch('/api/admin/jobs');
+                const params = new URLSearchParams();
+                if (jobStateFilter) params.set('state', jobStateFilter);
+                params.set('page', String(jobsPage));
+                params.set('limit', String(jobsLimit));
+                const res = await fetch(`/api/admin/jobs?${params.toString()}`);
                 const data = await res.json();
-                
-                const appRes = await fetch('/api/admin/applications');
-                const appData = await appRes.json();
-                
-                const enrichedJobs = data.map((job: JobPosition) => ({
-                    ...job,
-                    applicationCount: appData.filter((app: JobApplication) => app.jobId === job._id).length
-                }));
-                
-                setJobs(enrichedJobs);
+                setJobs(Array.isArray(data?.data) ? data.data : []);
+                setJobsTotal(typeof data?.total === 'number' ? data.total : 0);
             } else if (subTab === 'applications') {
                 const res = await fetch('/api/admin/applications');
                 const data = await res.json();
@@ -637,6 +629,8 @@ export function JobsTab() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     title: newJobTitle,
+                    location: newJobLocation,
+                    city: newJobCity,
                     sections: newJobSections,
                     imageUrl: newJobImageUrl,
                     imagePublicId: newJobImagePublicId,
@@ -646,6 +640,8 @@ export function JobsTab() {
             if (res.ok) {
                 setShowCreateModal(false);
                 setNewJobTitle("");
+                setNewJobLocation("");
+                setNewJobCity("");
                 setNewJobSections([]);
                 setNewJobImageUrl(null);
                 setNewJobImagePublicId(null);
@@ -678,6 +674,8 @@ export function JobsTab() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     title: newJobTitle,
+                    location: newJobLocation,
+                    city: newJobCity,
                     sections: newJobSections,
                     imageUrl: newJobImageUrl,
                     imagePublicId: newJobImagePublicId,
@@ -687,6 +685,8 @@ export function JobsTab() {
             if (res.ok) {
                 setShowEditModal(null);
                 setNewJobTitle("");
+                setNewJobLocation("");
+                setNewJobCity("");
                 setNewJobSections([]);
                 setNewJobImageUrl(null);
                 setNewJobImagePublicId(null);
@@ -935,9 +935,9 @@ export function JobsTab() {
         }
     };
 
-    // Client-side pagination calculations for Job Positions
-    const totalJobPages = Math.ceil(jobs.length / jobsLimit) || 1;
-    const paginatedJobs = jobs.slice((jobsPage - 1) * jobsLimit, jobsPage * jobsLimit);
+    // Server-side pagination for Job Positions (jobs already holds one page).
+    const totalJobPages = Math.ceil(jobsTotal / jobsLimit) || 1;
+    const paginatedJobs = jobs;
 
     return (
         <div className="space-y-6">
@@ -985,18 +985,33 @@ export function JobsTab() {
                 </div>
 
                 {subTab === 'positions' && (
-                    <button
-                        onClick={() => {
-                            setNewJobTitle("");
-                            setNewJobSections([]);
-                            setNewJobImageUrl(null);
-                            setNewJobImagePublicId(null);
-                            setShowCreateModal(true);
-                        }}
-                        className="bg-cyan-500 hover:bg-cyan-600 text-white font-semibold text-xs px-4 py-2 rounded-xl flex items-center gap-2 shadow-lg shadow-cyan-500/25 transition-all active:scale-95"
-                    >
-                        <Plus className="h-4 w-4" /> Add Position
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <div className="relative">
+                            <MapPin className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                            <select
+                                value={jobStateFilter}
+                                onChange={e => { setJobStateFilter(e.target.value); setJobsPage(1); }}
+                                className="text-xs font-semibold bg-white dark:bg-black/35 border border-slate-300/80 dark:border-white/10 rounded-xl pl-8 pr-3 py-2 text-slate-700 dark:text-slate-200 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none"
+                            >
+                                <option value="">All states</option>
+                                {LOCATION_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                        </div>
+                        <button
+                            onClick={() => {
+                                setNewJobTitle("");
+                                setNewJobLocation("");
+                                setNewJobCity("");
+                                setNewJobSections([]);
+                                setNewJobImageUrl(null);
+                                setNewJobImagePublicId(null);
+                                setShowCreateModal(true);
+                            }}
+                            className="bg-cyan-500 hover:bg-cyan-600 text-white font-semibold text-xs px-4 py-2 rounded-xl flex items-center gap-2 shadow-lg shadow-cyan-500/25 transition-all active:scale-95"
+                        >
+                            <Plus className="h-4 w-4" /> Add Position
+                        </button>
+                    </div>
                 )}
 
                 {subTab === 'forms' && (
@@ -1050,6 +1065,11 @@ export function JobsTab() {
                                             <tr key={job._id} className="hover:bg-white/[0.02] transition-colors group">
                                                 <td className="p-4 font-semibold text-slate-200 group-hover:text-cyan-400 transition-colors">
                                                     {job.title}
+                                                    {formatLocation(job.city, job.location) && (
+                                                        <span className="mt-0.5 flex items-center gap-1 text-[11px] font-normal text-slate-400">
+                                                            <MapPin className="h-3 w-3 text-cyan-400" /> {formatLocation(job.city, job.location)}
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td className="p-4">
                                                     <span className={`text-xs ${formObj ? 'text-slate-300 font-medium' : 'text-slate-500 italic'}`}>
@@ -1080,6 +1100,8 @@ export function JobsTab() {
                                                         <button
                                                             onClick={() => {
                                                                 setNewJobTitle(job.title);
+                                                                setNewJobLocation(job.location || "");
+                                                                setNewJobCity(job.city || "");
                                                                 setNewJobSections(job.sections || []);
                                                                 setNewJobImageUrl(job.imageUrl || null);
                                                                 setNewJobImagePublicId(job.imagePublicId || null);
@@ -1132,19 +1154,19 @@ export function JobsTab() {
                     {totalJobPages > 1 && (
                         <div className="p-4 border-t border-white/[0.04] flex items-center justify-between bg-white/[0.01]">
                             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                Page <span className="text-slate-200">{jobsPage}</span> of <span className="text-slate-200">{totalJobPages}</span> <span className="ml-2 text-slate-500">({jobs.length} positions)</span>
+                                Page <span className="text-slate-200">{jobsPage}</span> of <span className="text-slate-200">{totalJobPages}</span> <span className="ml-2 text-slate-500">({jobsTotal} position{jobsTotal === 1 ? '' : 's'}{jobStateFilter ? ` in ${jobStateFilter}` : ''})</span>
                             </div>
                             <div className="flex gap-2">
-                                <button 
-                                    onClick={() => setJobsPage(p => Math.max(1, p - 1))} 
-                                    disabled={jobsPage === 1} 
+                                <button
+                                    onClick={() => setJobsPage(p => Math.max(1, p - 1))}
+                                    disabled={jobsPage === 1}
                                     className="p-1.5 rounded-lg border border-white/10 bg-black/40 text-slate-300 disabled:opacity-30 hover:bg-white/[0.02] transition-colors flex items-center"
                                 >
                                     <ChevronLeft className="h-4 w-4" />
                                 </button>
-                                <button 
-                                    onClick={() => setJobsPage(p => Math.min(totalJobPages, p + 1))} 
-                                    disabled={jobsPage === totalJobPages} 
+                                <button
+                                    onClick={() => setJobsPage(p => Math.min(totalJobPages, p + 1))}
+                                    disabled={jobsPage >= totalJobPages}
                                     className="p-1.5 rounded-lg border border-white/10 bg-black/40 text-slate-300 disabled:opacity-30 hover:bg-white/[0.02] transition-colors flex items-center"
                                 >
                                     <ChevronRight className="h-4 w-4" />
@@ -1335,6 +1357,24 @@ export function JobsTab() {
                                     className="w-full text-sm bg-white dark:bg-black/35 border border-slate-300/80 dark:border-white/10 rounded-2xl px-4 py-3 text-slate-900 dark:text-white placeholder-slate-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all"
                                 />
 
+                                <label className="text-[11px] font-extrabold text-slate-600 dark:text-slate-400 uppercase tracking-widest pt-2 block">Location <span className="normal-case font-normal text-slate-400">(optional)</span></label>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <select
+                                        value={newJobLocation}
+                                        onChange={e => setNewJobLocation(e.target.value)}
+                                        className="w-full text-sm bg-white dark:bg-black/35 border border-slate-300/80 dark:border-white/10 rounded-2xl px-4 py-3 text-slate-900 dark:text-white focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all"
+                                    >
+                                        <option value="">Select a state…</option>
+                                        {LOCATION_OPTIONS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                                    </select>
+                                    <input
+                                        type="text"
+                                        value={newJobCity}
+                                        onChange={e => setNewJobCity(e.target.value)}
+                                        placeholder="City (optional)"
+                                        className="w-full text-sm bg-white dark:bg-black/35 border border-slate-300/80 dark:border-white/10 rounded-2xl px-4 py-3 text-slate-900 dark:text-white placeholder-slate-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all"
+                                    />
+                                </div>
                             </div>
 
                             {renderJobImageField()}
@@ -1444,6 +1484,24 @@ export function JobsTab() {
                                     className="w-full text-sm bg-white dark:bg-black/35 border border-slate-300/80 dark:border-white/10 rounded-2xl px-4 py-3 text-slate-900 dark:text-white placeholder-slate-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all"
                                 />
 
+                                <label className="text-[11px] font-extrabold text-slate-600 dark:text-slate-400 uppercase tracking-widest pt-2 block">Location <span className="normal-case font-normal text-slate-400">(optional)</span></label>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <select
+                                        value={newJobLocation}
+                                        onChange={e => setNewJobLocation(e.target.value)}
+                                        className="w-full text-sm bg-white dark:bg-black/35 border border-slate-300/80 dark:border-white/10 rounded-2xl px-4 py-3 text-slate-900 dark:text-white focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all"
+                                    >
+                                        <option value="">Select a state…</option>
+                                        {LOCATION_OPTIONS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                                    </select>
+                                    <input
+                                        type="text"
+                                        value={newJobCity}
+                                        onChange={e => setNewJobCity(e.target.value)}
+                                        placeholder="City (optional)"
+                                        className="w-full text-sm bg-white dark:bg-black/35 border border-slate-300/80 dark:border-white/10 rounded-2xl px-4 py-3 text-slate-900 dark:text-white placeholder-slate-500 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all"
+                                    />
+                                </div>
                             </div>
 
                             {renderJobImageField()}
@@ -1721,6 +1779,7 @@ export function JobsTab() {
                                             <option value="text">Short Answer</option>
                                             <option value="paragraph">Paragraph Text</option>
                                             <option value="number">Number Input</option>
+                                            <option value="date">Date Picker</option>
                                             <option value="select">Dropdown Selection</option>
                                             <option value="checkbox">Checkbox Selections</option>
                                             <option value="file">File Upload Link</option>
@@ -1968,14 +2027,13 @@ export function JobsTab() {
                                                             <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block">{field.label}</span>
                                                             <div className="text-sm font-semibold text-text-primary whitespace-pre-wrap leading-relaxed break-words">
                                                                 {isFile ? (
-                                                                    <a
-                                                                        href={rawVal}
-                                                                        target="_blank"
-                                                                        rel="noopener noreferrer"
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => openAdminFile(rawVal, field.label || 'Document')}
                                                                         className="inline-flex items-center gap-1.5 text-brand-primary hover:text-brand-primary-dark font-bold transition-colors"
                                                                     >
                                                                         <FileText className="h-3.5 w-3.5" /> View uploaded document
-                                                                    </a>
+                                                                    </button>
                                                                 ) : isEmpty ? (
                                                                     <span className="text-text-muted italic font-normal">No answer provided</span>
                                                                 ) : (
@@ -2024,9 +2082,9 @@ export function JobsTab() {
                                                                     {usesMetadataOnlyStorage(doc.documentType) ? 'Recorded value' : 'File'}
                                                                 </span>
                                                                 {doc.fileUrl ? (
-                                                                    <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="font-bold text-brand-primary hover:text-brand-primary-dark break-all transition-colors">
-                                                                        {doc.fileName || 'Open file'}
-                                                                    </a>
+                                                                    <button type="button" onClick={() => openAdminFile(doc.fileUrl, doc.fileName || 'Document')} className="font-bold text-brand-primary hover:text-brand-primary-dark break-all transition-colors text-left inline-flex items-center gap-1">
+                                                                        <Eye className="h-3.5 w-3.5 shrink-0" /> {doc.fileName || 'Open file'}
+                                                                    </button>
                                                                 ) : usesMetadataOnlyStorage(doc.documentType) ? (
                                                                     doc.value ? (
                                                                         <span className="font-bold text-text-primary break-all">{doc.value}</span>
@@ -2052,20 +2110,12 @@ export function JobsTab() {
                                                                     type="date"
                                                                     value={documentExpiryDrafts[doc._id] || ""}
                                                                     onChange={(e) => setDocumentExpiryDrafts(prev => ({ ...prev, [doc._id]: e.target.value }))}
-                                                                    className="ui-input w-full text-xs"
+                                                                    // Open the native picker on a click anywhere in the field, not just the calendar icon.
+                                                                    onClick={(e) => { try { (e.currentTarget as any).showPicker?.(); } catch {} }}
+                                                                    className="ui-input w-full text-xs cursor-pointer"
                                                                 />
                                                             </div>
                                                             <div className="flex items-center gap-2 flex-wrap md:justify-end">
-                                                                {usesMetadataOnlyStorage(doc.documentType) && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleRecordMetadataDocument(doc.documentType)}
-                                                                        disabled={recordingMetadataDocType === doc.documentType}
-                                                                        className="text-[10px] font-bold px-2.5 py-1 rounded-lg border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/15 transition-colors disabled:opacity-60"
-                                                                    >
-                                                                        {recordingMetadataDocType === doc.documentType ? 'Recording...' : 'Record received'}
-                                                                    </button>
-                                                                )}
                                                                 {requiresFileUpload(doc.documentType) && (
                                                                     <>
                                                                         <input
@@ -2312,6 +2362,38 @@ export function JobsTab() {
                     </div>
                 </div>
             )}
+
+            {/* In-page file viewer for submitted documents (streamed via /api/admin/file). */}
+            {viewerFile && (() => {
+                const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(viewerFile.name || '');
+                return (
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm" onClick={() => setViewerFile(null)}>
+                        <div className="w-full max-w-4xl h-[85vh] rounded-2xl border border-border-modal bg-surface-modal shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border-modal">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <FileText className="h-4 w-4 text-brand-primary shrink-0" />
+                                    <p className="text-sm font-bold text-text-primary truncate">{viewerFile.name}</p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                    <a href={viewerFile.url} download className="p-2 rounded-lg text-text-secondary hover:bg-slate-200/60 dark:hover:bg-white/[0.06] transition-colors" title="Download">
+                                        <Download className="h-4 w-4" />
+                                    </a>
+                                    <button type="button" onClick={() => setViewerFile(null)} className="p-2 rounded-lg text-text-secondary hover:bg-slate-200/60 dark:hover:bg-white/[0.06] transition-colors" title="Close">
+                                        <X className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex-1 bg-slate-100 dark:bg-black/40 overflow-auto flex items-center justify-center">
+                                {isImage ? (
+                                    <img src={viewerFile.url} alt={viewerFile.name} className="max-w-full max-h-full object-contain" />
+                                ) : (
+                                    <iframe src={viewerFile.url} title={viewerFile.name} className="w-full h-full border-0" />
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 }

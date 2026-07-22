@@ -3,13 +3,15 @@
 import { useState, useEffect, useRef, use, Fragment } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { 
-    Briefcase, FileText, Loader2, ArrowLeft, Lock, 
+import {
+    Briefcase, FileText, Loader2, ArrowLeft, Lock,
     AlertCircle, CheckCircle2, Moon, Sun, Upload, Trash2, Eye,
-    Home
+    Home, X, Download, MapPin
 } from "lucide-react";
 import type { DocumentType } from "@/models/ApplicationDocument";
-import { getDocumentLabel, getDefaultApplicationDocuments, DOCUMENT_METADATA, requiresFileUpload } from "@/lib/documentMetadata";
+import { getDocumentLabel, getDefaultApplicationDocuments, DOCUMENT_METADATA, requiresFileUpload, sanitizeMetadataValue, metadataValueError, metadataInputProps } from "@/lib/documentMetadata";
+import { resolveFieldType } from "@/lib/formFields";
+import { formatLocation } from "@/lib/usStates";
 
 interface DocumentRequirement {
     documentType: DocumentType;
@@ -24,7 +26,7 @@ interface DocumentRequirement {
 interface CustomField {
     name: string;
     label: string;
-    type: 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file';
+    type: 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file' | 'date';
     required: boolean;
     options?: string[];
     section?: string;
@@ -38,6 +40,8 @@ interface JobSection {
 interface JobPosition {
     _id: string;
     title: string;
+    location?: string | null;
+    city?: string | null;
     sections: JobSection[];
     status: 'open' | 'closed';
     customFields: CustomField[];
@@ -82,12 +86,32 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
     const [uploadedFileNames, setUploadedFileNames] = useState<Record<string, string>>({});
     const [uploadedFieldPublicIds, setUploadedFieldPublicIds] = useState<Record<string, string>>({});
 
+    // File open in the in-page preview modal (keeps the storage URL out of a
+    // separate tab / the address bar).
+    const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null);
+
     const [clientSessionId] = useState(() => {
         if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
             return crypto.randomUUID();
         }
         return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     });
+
+    // Preview a not-yet-submitted upload through our session-scoped proxy rather
+    // than the raw Cloudinary URL.
+    const openPreview = (publicId: string | undefined, name: string) => {
+        if (!publicId) return;
+        const url = `/api/upload/preview?publicId=${encodeURIComponent(publicId)}&clientSessionId=${encodeURIComponent(clientSessionId)}`;
+        setViewerFile({ url, name });
+    };
+
+    // Close the file preview on Escape.
+    useEffect(() => {
+        if (!viewerFile) return;
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setViewerFile(null); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [viewerFile]);
 
     const [templateDocumentRequirements, setTemplateDocumentRequirements] = useState<DocumentRequirement[]>(
         getDefaultApplicationDocuments().map((documentType) => ({
@@ -171,7 +195,9 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
 
             const data = await res.json();
             if (res.ok) {
-                setCustomAnswers(prev => ({ ...prev, [fieldName]: data.url }));
+                // Store the publicId reference (not a storage URL); the server
+                // resolves it to a real URL at submit time.
+                setCustomAnswers(prev => ({ ...prev, [fieldName]: data.public_id }));
                 setUploadedFileNames(prev => ({ ...prev, [fieldName]: file.name }));
                 if (typeof data.public_id === 'string' && data.public_id) {
                     setUploadedFieldPublicIds(prev => ({ ...prev, [fieldName]: data.public_id }));
@@ -292,7 +318,9 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
                     ...prev,
                     [documentType]: {
                         ...prev[documentType],
-                        fileUrl: data.url,
+                        // publicId reference stands in for the file; presence
+                        // checks stay truthy and the server resolves it on submit.
+                        fileUrl: data.public_id,
                         fileName: file.name,
                         publicId: data.public_id,
                         deliveryMethod: 'upload',
@@ -322,15 +350,16 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
     // as a typed value rather than a file. Delivery is 'email' by convention (no
     // stored file); the admin sets the expiry during review.
     const handleDocumentValueChange = (documentType: DocumentType, value: string) => {
+        const clean = sanitizeMetadataValue(documentType, value);
         setDocumentUploads(prev => ({
             ...prev,
             [documentType]: {
                 ...prev[documentType],
-                value,
+                value: clean,
                 deliveryMethod: 'email',
             },
         }));
-        if (value.trim()) {
+        if (clean.trim()) {
             setDocumentErrors(prev => ({ ...prev, [documentType]: "" }));
         }
     };
@@ -396,6 +425,12 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
                     setIsSubmitting(false);
                     return;
                 }
+                const fmtError = metadataValueError(documentType, upload.value);
+                if (fmtError) {
+                    setFormError(fmtError);
+                    setIsSubmitting(false);
+                    return;
+                }
                 continue;
             }
 
@@ -415,6 +450,13 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
             const upload = documentUploads[documentType];
 
             if (!docRequiresFile(documentType)) {
+                // Optional metadata value: allowed blank, but if given must be valid.
+                const fmtError = upload?.value ? metadataValueError(documentType, upload.value) : null;
+                if (fmtError) {
+                    setFormError(fmtError);
+                    setIsSubmitting(false);
+                    return;
+                }
                 continue;
             }
 
@@ -633,6 +675,11 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
                             <h1 className="text-3xl md:text-4xl font-black text-text-primary tracking-tight leading-tight">
                                 {job.title}
                             </h1>
+                            {formatLocation(job.city, job.location) && (
+                                <p className="flex items-center gap-1.5 text-sm font-bold text-brand-primary">
+                                    <MapPin className="h-4 w-4" /> {formatLocation(job.city, job.location)}
+                                </p>
+                            )}
                             <p className="text-sm md:text-base text-text-secondary font-medium max-w-2xl">
                                 Complete the form below to apply for this role. Your answers, documents, and access code will be sent to the hiring team.
                             </p>
@@ -755,6 +802,7 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
                             <div className="space-y-6">
                                 {orderedCustomFields.map((field, __i) => {
                                     const __sec = sectionOf(field);
+                                    const ftype = resolveFieldType(field);
                                     // First-section fields sit under the header above; every other
                                     // section gets an inline heading at the start of its group.
                                     const __showHeader = __sec !== firstSectionLabel && (__i === 0 || sectionOf(orderedCustomFields[__i - 1]) !== __sec);
@@ -771,13 +819,25 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
                                             {field.label} {field.required && <span className="text-rose-500 font-bold">*</span>}
                                         </label>
 
-                                        {field.type === 'text' && (
+                                        {ftype === 'text' && (
                                             <input
                                                 type="text"
                                                 required={field.required}
                                                 value={customAnswers[field.name] || ""}
                                                 onChange={e => handleFieldChange(field.name, e.target.value)}
                                                 className="w-full text-sm bg-bg-input border border-border-input rounded-xl px-4 py-2.5 text-text-input outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary/50 transition-all"
+                                            />
+                                        )}
+
+                                        {ftype === 'date' && (
+                                            <input
+                                                type="date"
+                                                required={field.required}
+                                                value={customAnswers[field.name] || ""}
+                                                onChange={e => handleFieldChange(field.name, e.target.value)}
+                                                // Open the native picker on a click anywhere in the field, not just the calendar icon.
+                                                onClick={e => { try { (e.currentTarget as any).showPicker?.(); } catch {} }}
+                                                className="w-full text-sm bg-bg-input border border-border-input rounded-xl px-4 py-2.5 text-text-input outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary/50 transition-all cursor-pointer [color-scheme:light] dark:[color-scheme:dark]"
                                             />
                                         )}
 
@@ -880,14 +940,13 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
                                                                 <p className="text-xs font-bold text-text-primary max-w-[280px] md:max-w-[400px] truncate">
                                                                     {uploadedFileNames[field.name] || "Document Uploaded"}
                                                                 </p>
-                                                                <a 
-                                                                    href={customAnswers[field.name]} 
-                                                                    target="_blank" 
-                                                                    rel="noreferrer" 
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openPreview(uploadedFieldPublicIds[field.name], uploadedFileNames[field.name] || 'Uploaded file')}
                                                                     className="text-[10px] text-brand-primary hover:underline font-semibold flex items-center gap-0.5"
                                                                 >
                                                                     <Eye className="h-3 w-3" /> View Uploaded File
-                                                                </a>
+                                                                </button>
                                                             </div>
                                                         </div>
                                                         <button
@@ -999,9 +1058,13 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
                                                 <div className="flex items-center justify-between bg-surface-card border border-border-card rounded-xl p-3 gap-4">
                                                     <div className="min-w-0">
                                                         <p className="text-sm font-semibold text-text-primary truncate">{upload.fileName}</p>
-                                                        <a href={upload.fileUrl} target="_blank" rel="noreferrer" className="text-[10px] text-brand-primary hover:underline font-semibold inline-flex items-center gap-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openPreview(upload.publicId, upload.fileName || 'Uploaded file')}
+                                                            className="text-[10px] text-brand-primary hover:underline font-semibold inline-flex items-center gap-1"
+                                                        >
                                                             <Eye className="h-3 w-3" /> View file
-                                                        </a>
+                                                        </button>
                                                     </div>
                                                     <button
                                                         type="button"
@@ -1104,7 +1167,9 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
                                                         type="text"
                                                         value={value}
                                                         onChange={(e) => handleDocumentValueChange(documentType, e.target.value)}
-                                                        placeholder={`Enter ${label}`}
+                                                        placeholder={metadataInputProps(documentType).placeholder || `Enter ${label}`}
+                                                        inputMode={metadataInputProps(documentType).inputMode}
+                                                        maxLength={metadataInputProps(documentType).maxLength}
                                                         className="w-full text-sm bg-bg-input border border-border-input rounded-xl px-4 py-2.5 text-text-input placeholder-placeholder-input outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary/50 transition-all"
                                                     />
                                                 </div>
@@ -1240,6 +1305,39 @@ export default function JobApplyPage({ params }: { params: Promise<{ id: string 
                     </div>
                 </div>
             )}
+
+            {/* In-page file viewer — streams the upload via our proxy so the raw
+                storage URL never opens in a separate tab / the address bar. */}
+            {viewerFile && (() => {
+                const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(viewerFile.name || '');
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setViewerFile(null)}>
+                        <div className="w-full max-w-4xl h-[85vh] rounded-2xl border border-border-modal bg-surface-modal shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sidebar-border">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <FileText className="h-4 w-4 text-brand-primary shrink-0" />
+                                    <p className="text-sm font-bold text-text-primary truncate">{viewerFile.name}</p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                    <a href={viewerFile.url} download className="p-2 rounded-lg text-text-secondary hover:bg-slate-200/60 dark:hover:bg-white/[0.06] transition-colors" title="Download">
+                                        <Download className="h-4 w-4" />
+                                    </a>
+                                    <button type="button" onClick={() => setViewerFile(null)} className="p-2 rounded-lg text-text-secondary hover:bg-slate-200/60 dark:hover:bg-white/[0.06] transition-colors" title="Close">
+                                        <X className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex-1 bg-slate-100 dark:bg-black/40 overflow-auto flex items-center justify-center">
+                                {isImage ? (
+                                    <img src={viewerFile.url} alt={viewerFile.name} className="max-w-full max-h-full object-contain" />
+                                ) : (
+                                    <iframe src={viewerFile.url} title={viewerFile.name} className="w-full h-full border-0" />
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 }

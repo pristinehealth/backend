@@ -7,6 +7,9 @@ import ApplicationDocument, { type DocumentType } from '@/models/ApplicationDocu
 import UploadAsset from '@/models/UploadAsset';
 import { DOCUMENT_METADATA, requiresFileUpload } from '@/lib/documentMetadata';
 import { verifyApplicationAccess } from '@/lib/applicationAccess';
+import { sanitizeApplicantNotes } from '@/lib/applicationNotes';
+import { buildDocumentFileRef, buildFieldFileRef, isFileProxyRef } from '@/lib/applicationFiles';
+import { resolveFileReference } from '@/lib/uploadResolve';
 import { getApplicationDocumentRequirements } from '@/lib/compliance';
 import { deleteAssetByPublicId } from '@/lib/cloudinary';
 
@@ -149,19 +152,47 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     const documentRequirements = await catalogRequirements(application.jobId);
 
-    const documents = await ApplicationDocument.find({ applicationId: application._id })
+    const rawDocuments = await ApplicationDocument.find({ applicationId: application._id })
       .select('documentType deliveryMethod fileName fileUrl expiryDate status uploadedAt rejectionReason')
       .sort({ uploadedAt: -1 })
       .lean();
+
+    // Credentials the client already holds, threaded into each proxy ref so the
+    // viewer can stream the file without ever seeing the storage URL.
+    const cred = new URLSearchParams({ email, accessToken }).toString();
+    const appIdStr = String(application._id);
+
+    // Swap each document's stored URL for a same-origin proxy ref.
+    const documents = rawDocuments.map((doc: any) => ({
+      ...doc,
+      fileUrl: doc.fileUrl ? buildDocumentFileRef(appIdStr, String(doc._id), cred) : '',
+    }));
+
+    // Do the same for custom-field file uploads (their URL lives inside the
+    // answer map). Non-file answers pass through untouched.
+    const fileFieldNames = new Set(
+      (Array.isArray(form?.customFields) ? form.customFields : [])
+        .filter((f: any) => f.type === 'file')
+        .map((f: any) => f.name)
+    );
+    const rawCustomValues = application.customFieldValues instanceof Map
+      ? Object.fromEntries(application.customFieldValues)
+      : (application.customFieldValues || {});
+    const customFieldValues: Record<string, any> = {};
+    for (const [key, value] of Object.entries(rawCustomValues)) {
+      customFieldValues[key] = fileFieldNames.has(key) && typeof value === 'string' && value
+        ? buildFieldFileRef(appIdStr, key, cred)
+        : value;
+    }
 
     return NextResponse.json({
       application: {
         _id: application._id,
         applicantName: application.applicantName,
         applicantEmail: application.applicantEmail,
-        customFieldValues: application.customFieldValues,
+        customFieldValues,
         status: application.status,
-        notes: application.notes,
+        notes: sanitizeApplicantNotes(application.notes),
         createdAt: application.createdAt,
         updatedAt: application.updatedAt,
       },
@@ -234,6 +265,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     const validatedValues = customValidation.values || {};
+
+    // Resolve custom-field file answers. An unchanged file comes back as our
+    // proxy ref → keep the existing stored URL. A newly uploaded file comes back
+    // as a publicId → resolve to its stored URL (a legacy raw URL passes through).
+    for (const field of formFields) {
+      if (field.type !== 'file') continue;
+      const key = field.name;
+      const value = validatedValues[key];
+      if (value === undefined) continue;
+      if (isFileProxyRef(value)) {
+        const previous = application.customFieldValues?.get?.(key);
+        validatedValues[key] = typeof previous === 'string' ? previous : '';
+      } else {
+        validatedValues[key] = await resolveFileReference(value);
+      }
+    }
+
     const derivedName = [
       (validatedValues.first_name || '').toString().trim(),
       (validatedValues.last_name || '').toString().trim(),
@@ -244,24 +292,29 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const normalizedApplicantName = (applicantName || '').toString().trim() || derivedName || application.applicantName;
 
-    const normalizedDocs = submittedDocs
-      .filter((doc) => doc && doc.documentType)
-      .filter((doc) => requiresFileUpload(doc.documentType as DocumentType))
-      .map((doc) => ({
-        applicationId: application._id,
-        documentType: doc.documentType as DocumentType,
-        deliveryMethod: doc.deliveryMethod === 'email' ? 'email' : 'upload',
-        fileUrl: typeof doc.fileUrl === 'string' ? doc.fileUrl : '',
-        fileName: typeof doc.fileName === 'string' ? doc.fileName : '',
-        expiryDate: doc.expiryDate ? new Date(doc.expiryDate) : null,
-        uploadedAt: new Date(),
-        status: 'pending' as const,
-      }));
-
     const existingDocuments = await ApplicationDocument.find({ applicationId: application._id });
     const existingByType = new Map(
       existingDocuments.map((doc) => [doc.documentType, doc])
     );
+
+    const normalizedDocs = await Promise.all(submittedDocs
+      .filter((doc) => doc && doc.documentType)
+      .filter((doc) => requiresFileUpload(doc.documentType as DocumentType))
+      .map(async (doc) => ({
+        applicationId: application._id,
+        documentType: doc.documentType as DocumentType,
+        deliveryMethod: doc.deliveryMethod === 'email' ? 'email' : 'upload',
+        // A proxy ref means "unchanged" → keep the existing stored URL. Otherwise
+        // it is a fresh upload: a publicId to resolve (or, legacy, a raw URL).
+        fileUrl: isFileProxyRef(doc.fileUrl)
+          ? (existingByType.get(doc.documentType as DocumentType)?.fileUrl || '')
+          : await resolveFileReference(doc.publicId || doc.fileUrl),
+        fileName: typeof doc.fileName === 'string' ? doc.fileName : '',
+        expiryDate: doc.expiryDate ? new Date(doc.expiryDate) : null,
+        uploadedAt: new Date(),
+        status: 'pending' as const,
+      })));
+
     const submittedTypes = new Set(normalizedDocs.map((doc) => doc.documentType));
 
     application.applicantName = normalizedApplicantName;

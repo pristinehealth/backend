@@ -40,7 +40,7 @@ const ApplicationFormSchema = new mongoose.Schema<ApplicationFormDocument>(
                 label: { type: String, required: true },
                 type: {
                     type: String,
-                    enum: ['text', 'paragraph', 'number', 'select', 'checkbox', 'file'],
+                    enum: ['text', 'paragraph', 'number', 'select', 'checkbox', 'file', 'date'],
                     required: true,
                 },
                 required: { type: Boolean, default: false },

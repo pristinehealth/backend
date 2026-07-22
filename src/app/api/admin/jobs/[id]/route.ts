@@ -4,6 +4,7 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import dbConnect from '@/lib/mongoose';
 import JobPosition from '@/models/JobPosition';
 import { markImageConsumed, discardPositionImage } from '@/lib/positionImage';
+import { LOCATION_SET } from '@/lib/usStates';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +41,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         const imageChanged = imageFieldSent && (body.imageUrl || null) !== (oldUrl || null);
 
         if (imageFieldSent && !body.imageUrl) body.imagePublicId = null; // removed → clear id too
+
+        // Constrain location to the predefined set (or clear it); city is free text.
+        if (Object.prototype.hasOwnProperty.call(body, 'location')) {
+            body.location = (typeof body.location === 'string' && LOCATION_SET.has(body.location)) ? body.location : null;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, 'city')) {
+            body.city = (typeof body.city === 'string' && body.city.trim()) ? body.city.trim() : null;
+        }
 
         const updatedJob = await JobPosition.findByIdAndUpdate(
             id,

@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   LogOut, Users, UsersRound, Building2, ClipboardList, Briefcase, Settings,
-  Menu, X, Sun, Moon, Loader2, LayoutDashboard, Sparkles, ShieldCheck
+  Menu, X, Sun, Moon, Loader2, LayoutDashboard, Sparkles, ShieldCheck, UserCheck, ChevronDown
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -19,8 +19,9 @@ import { JobsTab } from "../tabs/JobsTab";
 import { SettingsTab } from "../tabs/SettingsTab";
 import { OverviewTab } from "../tabs/OverviewTab";
 import { ComplianceTab } from "../tabs/ComplianceTab";
+import { OnboardingTab } from "../tabs/OnboardingTab";
 
-type TabOption = "overview" | "staff" | "customers" | "contacts" | "tasks" | "projects" | "jobs" | "compliance" | "settings";
+type TabOption = "overview" | "staff" | "customers" | "contacts" | "tasks" | "projects" | "jobs" | "onboarding" | "compliance" | "settings";
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
@@ -28,6 +29,8 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabOption>("overview");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  // Which collapsible sidebar groups are open (keyed by group id).
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   // Initialize theme from document class
   useEffect(() => {
@@ -39,7 +42,7 @@ export default function Dashboard() {
   // active tab is restored after a page reload).
   useEffect(() => {
     const tab = new URLSearchParams(window.location.search).get("tab");
-    const valid: TabOption[] = ["overview", "staff", "customers", "contacts", "tasks", "projects", "jobs", "compliance", "settings"];
+    const valid: TabOption[] = ["overview", "staff", "customers", "contacts", "tasks", "projects", "jobs", "onboarding", "compliance", "settings"];
     if (tab && (valid as string[]).includes(tab)) {
       setActiveTab(tab as TabOption);
     }
@@ -95,6 +98,7 @@ export default function Dashboard() {
     { id: "projects", label: "Projects", icon: ClipboardList, description: "Projects & delivery" },
     { id: "tasks", label: "Tasks", icon: ClipboardList, description: "Tasks & service reports" },
     { id: "jobs", label: "Jobs", icon: Briefcase, description: "Postings & applications" },
+    { id: "onboarding", label: "Onboarding", icon: UserCheck, description: "Accepted candidates & questionnaires" },
     { id: "compliance", label: "Compliance", icon: ShieldCheck, description: "Requirements & credentials" },
     { id: "settings", label: "Settings", icon: Settings, description: "Account & system" },
   ] as const;
@@ -111,24 +115,65 @@ export default function Dashboard() {
         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3 px-2">
             Navigation
         </div>
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => { setActiveTab(tab.id as TabOption); setMobileMenuOpen(false); }}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm transition-all border border-transparent",
-                activeTab === tab.id
-                  ? "bg-brand-primary-muted text-brand-primary border-brand-primary/25 shadow-sm"
-                  : "text-slate-600 dark:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-white/[0.03] hover:text-slate-900 dark:hover:text-white"
-              )}
-            >
-              <Icon className={cn("h-4.5 w-4.5", activeTab === tab.id ? "text-brand-primary" : "text-slate-500 dark:text-slate-400")} />
-              {tab.label}
-            </button>
-          );
-        })}
+        {(() => {
+          // A single leaf nav button, optionally indented as a submenu item.
+          const renderLeaf = (tab: (typeof tabs)[number], indented = false) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => { setActiveTab(tab.id as TabOption); setMobileMenuOpen(false); }}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm transition-all border border-transparent",
+                  indented && "pl-9",
+                  activeTab === tab.id
+                    ? "bg-brand-primary-muted text-brand-primary border-brand-primary/25 shadow-sm"
+                    : "text-slate-600 dark:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-white/[0.03] hover:text-slate-900 dark:hover:text-white"
+                )}
+              >
+                <Icon className={cn("h-4.5 w-4.5", activeTab === tab.id ? "text-brand-primary" : "text-slate-500 dark:text-slate-400")} />
+                {tab.label}
+              </button>
+            );
+          };
+
+          // Jobs + Onboarding are grouped under one collapsible "Recruitment" menu.
+          const recruitmentChildren = tabs.filter((t) => t.id === "jobs" || t.id === "onboarding");
+          const childActive = activeTab === "jobs" || activeTab === "onboarding";
+          const recruitmentOpen = expandedGroups["recruitment"] ?? childActive;
+
+          const nodes: React.ReactNode[] = [];
+          for (const tab of tabs) {
+            if (tab.id === "onboarding") continue; // rendered inside the group
+            if (tab.id === "jobs") {
+              nodes.push(
+                <div key="recruitment" className="space-y-1">
+                  <button
+                    onClick={() => setExpandedGroups((prev) => ({ ...prev, recruitment: !recruitmentOpen }))}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm transition-all border border-transparent",
+                      childActive
+                        ? "text-brand-primary"
+                        : "text-slate-600 dark:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-white/[0.03] hover:text-slate-900 dark:hover:text-white"
+                    )}
+                  >
+                    <Briefcase className={cn("h-4.5 w-4.5", childActive ? "text-brand-primary" : "text-slate-500 dark:text-slate-400")} />
+                    <span className="flex-1 text-left">Recruitment</span>
+                    <ChevronDown className={cn("h-4 w-4 transition-transform", recruitmentOpen ? "" : "-rotate-90")} />
+                  </button>
+                  {recruitmentOpen && (
+                    <div className="space-y-1">
+                      {recruitmentChildren.map((c) => renderLeaf(c, true))}
+                    </div>
+                  )}
+                </div>
+              );
+            } else {
+              nodes.push(renderLeaf(tab));
+            }
+          }
+          return nodes;
+        })()}
       </div>
 
       <div className="p-4 border-t border-sidebar-border space-y-1">
@@ -213,6 +258,7 @@ export default function Dashboard() {
             {activeTab === "projects" && <ProjectsTab />}
             {activeTab === "tasks" && <TasksTab />}
             {activeTab === "jobs" && <JobsTab />}
+            {activeTab === "onboarding" && <OnboardingTab />}
             {activeTab === "compliance" && <ComplianceTab />}
             {activeTab === "settings" && <SettingsTab />}
             </section>

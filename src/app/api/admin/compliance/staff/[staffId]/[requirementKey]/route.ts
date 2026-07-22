@@ -10,10 +10,11 @@ import ComplianceEvent from '@/models/ComplianceEvent';
 import UploadAsset from '@/models/UploadAsset';
 import { deleteAssetByUrl } from '@/lib/cloudinary';
 import { refreshStaffComplianceStatus, isExpiryElapsed } from '@/lib/compliance';
+import { metadataValueError } from '@/lib/documentMetadata';
 
 export const dynamic = 'force-dynamic';
 
-type Action = 'verify' | 'reject' | 'set_expiry' | 'add_evidence' | 'assign' | 'unassign';
+type Action = 'verify' | 'reject' | 'set_expiry' | 'add_evidence' | 'assign' | 'unassign' | 'exempt';
 
 async function requireAdmin() {
   const session = await getServerSession(authOptions);
@@ -99,6 +100,51 @@ export async function POST(
       return NextResponse.json({ success: true, removed: true, filesDeleted });
     }
 
+    // --- exempt: remove this requirement for THIS staff member specifically ----
+    // Works for role/position-targeted requirements too (which unassign refuses):
+    // it marks the requirement exempted so it is hidden and not re-materialized,
+    // rather than deleting a record that targeting would just recreate.
+    if (action === 'exempt') {
+      let record = await StaffComplianceRecord.findOne({ staffId, requirementKey });
+      let filesDeleted = 0;
+      if (record) {
+        const evs = await ComplianceEvidence.find({ recordId: record._id }).select('fileUrl').lean();
+        for (const ev of evs as any[]) {
+          if (ev.fileUrl) {
+            try { await deleteAssetByUrl(ev.fileUrl); filesDeleted += 1; } catch (e: any) {
+              console.error('[Compliance Exempt] Cloudinary delete failed:', e?.message || e);
+            }
+          }
+        }
+        await ComplianceEvidence.deleteMany({ recordId: record._id });
+        record.exempted = true;
+        record.exemptedAt = now;
+        record.exemptedBy = actor;
+        record.status = 'missing';
+        record.rejectionReason = null;
+        record.verifiedAt = null;
+        record.verifiedBy = null;
+        record.expiryDate = null;
+        record.lastCheckedAt = now;
+        await record.save();
+      } else {
+        record = await StaffComplianceRecord.create({
+          staffId,
+          staffEmail,
+          requirementKey,
+          status: 'missing',
+          exempted: true,
+          exemptedAt: now,
+          exemptedBy: actor,
+          lastCheckedAt: now,
+        });
+      }
+      await ComplianceEvent.create({ recordId: record._id, eventType: 'exempted', actor, payload: {} });
+      console.log('[Compliance Staff Action] exempted', { staffId, requirementKey, filesDeleted });
+      try { await refreshStaffComplianceStatus([staffId]); } catch (e: any) { console.error('[Compliance Staff Action] refresh failed:', e?.message || e); }
+      return NextResponse.json({ success: true, exempted: true, filesDeleted });
+    }
+
     // --- everything else upserts the record -----------------------------------
     let record = await StaffComplianceRecord.findOne({ staffId, requirementKey });
     let created = false;
@@ -126,6 +172,8 @@ export async function POST(
     switch (action) {
       case 'assign': {
         if (!record.assignedManually) record.assignedManually = true;
+        // Re-attaching clears a prior exemption so the requirement applies again.
+        if (record.exempted) { record.exempted = false; record.exemptedAt = null; record.exemptedBy = null; }
         break; // record_created event already covers a fresh assignment
       }
       case 'verify': {
@@ -163,6 +211,11 @@ export async function POST(
       case 'add_evidence': {
         const ev = body.evidence || {};
         const hasFile = !!ev.fileUrl;
+        // Enforce typed-value formats (e.g. SSN = 9 digits) server-side too.
+        const refError = ev.reference ? metadataValueError(requirementKey, ev.reference) : null;
+        if (refError) {
+          return NextResponse.json({ error: refError }, { status: 400 });
+        }
         // Replace (no history): delete existing evidence + their Cloudinary files,
         // then add the new one as the only evidence for this requirement.
         const prior = await ComplianceEvidence.find({ recordId: record._id }).select('fileUrl').lean();

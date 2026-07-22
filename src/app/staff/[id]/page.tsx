@@ -12,6 +12,10 @@ import {
   ShieldCheck,
   ShieldX,
   User,
+  UserCheck,
+  X,
+  Download,
+  FileText,
 } from "lucide-react";
 import { type ComplianceSummary, overallStatus, OVERALL_META } from "../../tabs/compliance/shared";
 
@@ -41,6 +45,13 @@ export default function StaffDetailPage({ params }: { params: Promise<{ id: stri
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const [onboarding, setOnboarding] = useState<{ status: string } | null>(null);
+  const [onboardingLoading, setOnboardingLoading] = useState(true);
+  const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null);
+
+  // Open a stored file through the admin proxy (signs private assets) in the modal.
+  const openFile = (fileUrl: string, name: string) =>
+    setViewerFile({ url: `/api/admin/file?src=${encodeURIComponent(fileUrl)}`, name });
 
   useEffect(() => {
     fetch('/api/staff/auth-status')
@@ -50,6 +61,25 @@ export default function StaffDetailPage({ params }: { params: Promise<{ id: stri
       })
       .catch(() => {});
   }, []);
+
+  // Onboarding status (resolved from this staff's accepted application → record).
+  useEffect(() => {
+    const controller = new AbortController();
+    setOnboardingLoading(true);
+    fetch(`/api/admin/staff/${encodeURIComponent(id)}/onboarding`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(data => setOnboarding({ status: data?.status || 'no_application' }))
+      .catch(err => { if (err?.name !== 'AbortError') setOnboarding(null); })
+      .finally(() => setOnboardingLoading(false));
+    return () => controller.abort();
+  }, [id]);
+
+  useEffect(() => {
+    if (!viewerFile) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setViewerFile(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [viewerFile]);
 
   useEffect(() => {
     let cancelled = false;
@@ -290,6 +320,38 @@ export default function StaffDetailPage({ params }: { params: Promise<{ id: stri
           )}
         </section>
 
+        <section className="crm-panel p-6 md:p-7 space-y-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.25em] text-text-muted">Onboarding</p>
+              <h3 className="mt-1 text-xl font-black text-text-primary">Onboarding status</h3>
+            </div>
+            {!onboardingLoading && onboarding && onboarding.status !== 'no_application' && (() => {
+              const s = onboarding.status;
+              const meta = s === 'completed'
+                ? { label: 'Completed', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' }
+                : s === 'in_progress'
+                  ? { label: 'In progress', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' }
+                  : { label: 'Not started', cls: 'ui-card-soft ui-muted' };
+              return <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold border ${meta.cls}`}>{meta.label}</span>;
+            })()}
+          </div>
+          {onboardingLoading ? (
+            <div className="flex items-center py-4 text-text-secondary"><Loader2 className="h-6 w-6 animate-spin text-brand-primary" /></div>
+          ) : (!onboarding || onboarding.status === 'no_application') ? (
+            <div className="rounded-2xl border border-dashed border-border-card bg-surface-card p-6 text-sm text-text-secondary">
+              No accepted application on file.
+            </div>
+          ) : (
+            <Link
+              href="/dashboard?tab=onboarding"
+              className="inline-flex items-center gap-1.5 text-sm font-bold text-brand-primary hover:text-brand-primary-dark transition-colors"
+            >
+              <UserCheck className="h-4 w-4" /> Open onboarding
+            </Link>
+          )}
+        </section>
+
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="crm-panel p-6 md:p-7 space-y-5">
             <div>
@@ -369,9 +431,9 @@ export default function StaffDetailPage({ params }: { params: Promise<{ id: stri
                         </p>
                       </div>
                       {card.evidence?.fileUrl ? (
-                        <a href={card.evidence.fileUrl} target="_blank" rel="noreferrer" className="shrink-0 inline-flex items-center gap-1.5 text-xs font-bold text-brand-primary hover:text-brand-primary-dark transition-colors">
+                        <button type="button" onClick={() => openFile(card.evidence.fileUrl, card.label || 'Document')} className="shrink-0 inline-flex items-center gap-1.5 text-xs font-bold text-brand-primary hover:text-brand-primary-dark transition-colors">
                           <Eye className="h-3.5 w-3.5" /> View file
-                        </a>
+                        </button>
                       ) : card.evidence?.reference ? (
                         <span className="shrink-0 text-xs text-text-secondary">Recorded: <span className="font-bold text-text-primary">{card.evidence.reference}</span></span>
                       ) : (
@@ -387,7 +449,8 @@ export default function StaffDetailPage({ params }: { params: Promise<{ id: stri
                             type="date"
                             value={expiryDrafts[card.requirementKey] || ''}
                             onChange={(event) => setExpiryDrafts(prev => ({ ...prev, [card.requirementKey]: event.target.value }))}
-                            className="w-full text-sm bg-bg-input border border-border-input rounded-xl px-4 py-2.5 text-text-input outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary/40"
+                            onClick={(e) => { try { (e.currentTarget as any).showPicker?.(); } catch {} }}
+                            className="w-full text-sm bg-bg-input border border-border-input rounded-xl px-4 py-2.5 text-text-input outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary/40 cursor-pointer"
                           />
                         </div>
                         <button
@@ -412,6 +475,27 @@ export default function StaffDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </section>
       </main>
+
+      {/* In-page file viewer (streamed via /api/admin/file so private assets are signed). */}
+      {viewerFile && (() => {
+        const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(viewerFile.name || '');
+        return (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm" onClick={() => setViewerFile(null)}>
+            <div className="w-full max-w-4xl h-[85vh] rounded-2xl border border-border-modal bg-surface-modal shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border-modal">
+                <div className="flex items-center gap-2 min-w-0"><FileText className="h-4 w-4 text-brand-primary shrink-0" /><p className="text-sm font-bold text-text-primary truncate">{viewerFile.name}</p></div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <a href={viewerFile.url} download className="p-2 rounded-lg text-text-secondary hover:bg-white/[0.06]" title="Download"><Download className="h-4 w-4" /></a>
+                  <button type="button" onClick={() => setViewerFile(null)} className="p-2 rounded-lg text-text-secondary hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
+                </div>
+              </div>
+              <div className="flex-1 bg-slate-100 dark:bg-black/40 overflow-auto flex items-center justify-center">
+                {isImage ? <img src={viewerFile.url} alt={viewerFile.name} className="max-w-full max-h-full object-contain" /> : <iframe src={viewerFile.url} title={viewerFile.name} className="w-full h-full border-0" />}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

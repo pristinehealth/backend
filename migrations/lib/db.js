@@ -15,7 +15,7 @@
 require('dotenv').config({ path: '.env' });
 const mongoose = require('mongoose');
 
-const MONGODB_URI = process.env.MONGO_URI;
+const MONGODB_URI = '';
 if (!MONGODB_URI) {
   console.error('[migration] Missing required environment variable MONGO_URI');
   process.exit(1);
@@ -47,6 +47,7 @@ function buildModels() {
     Staff: dynamicModel('Staff', 'staffs'),
     StaffDocument: dynamicModel('StaffDocument', 'staffdocuments'),
     ApplicationDocument: dynamicModel('ApplicationDocument', 'applicationdocuments'),
+    ApplicationForm: dynamicModel('ApplicationForm', 'applicationforms'),
     JobApplication: dynamicModel('JobApplication', 'jobapplications'),
     JobPosition: dynamicModel('JobPosition', 'jobpositions'),
 
