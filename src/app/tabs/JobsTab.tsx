@@ -6,7 +6,7 @@ import {
     Briefcase, Plus, ToggleLeft, ToggleRight, Loader2, Eye, 
     Calendar, CheckCircle, XCircle, AlertCircle, FileText, User, 
     Mail, MessageSquare, Send, Check, Trash2, X, ListTodo, Info, HelpCircle, Edit, ClipboardList,
-    ChevronLeft, ChevronRight, Download, MapPin
+    ChevronLeft, ChevronRight, Download, MapPin, GripVertical, ChevronUp, ChevronDown
 } from "lucide-react";
 import { downloadApplicationPdf, toApplicationPdfData } from "@/lib/pdf/application";
 import type { DocumentType } from "@/models/ApplicationDocument";
@@ -254,6 +254,12 @@ export function JobsTab() {
     const [formFields, setFormFields] = useState<CustomField[]>([]);
     const [formDocumentRequirements, setFormDocumentRequirements] = useState<DocumentRequirement[]>(DEFAULT_DOCUMENT_REQUIREMENTS);
     const [editingFormId, setEditingFormId] = useState<string | null>(null);
+    // Drag-to-reorder state for the question list (index being dragged / hovered).
+    // `armedDragIdx` gates the row's `draggable` flag to the grip handle so the
+    // inline section input stays selectable with the mouse.
+    const [dragFieldIdx, setDragFieldIdx] = useState<number | null>(null);
+    const [dragOverFieldIdx, setDragOverFieldIdx] = useState<number | null>(null);
+    const [armedDragIdx, setArmedDragIdx] = useState<number | null>(null);
 
     // Documents are now driven by the compliance catalog (collectAtApplication),
     // not the form. Read-only view of what will apply — shares the RTK Query
@@ -476,6 +482,37 @@ export function JobsTab() {
     const handleFieldSectionChange = (index: number, section: string) => {
         setFormFields(prev => prev.map((f, i) => (i === index ? { ...f, section } : f)));
     };
+
+    // Array order IS the applicant-facing order: the apply page groups questions
+    // by section in first-appearance order, then renders each section's questions
+    // in array order. So moving a row here is all that's needed to reorder a form —
+    // no need to delete and re-add questions to slot one in.
+    const moveField = (from: number, to: number) => {
+        setFormFields(prev => {
+            if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+            const next = [...prev];
+            const [moved] = next.splice(from, 1);
+            next.splice(to, 0, moved);
+            return next;
+        });
+    };
+
+    const handleFieldDrop = (targetIdx: number) => {
+        if (dragFieldIdx !== null) moveField(dragFieldIdx, targetIdx);
+        setDragFieldIdx(null);
+        setDragOverFieldIdx(null);
+    };
+
+    // Mirrors the apply page's grouping so the builder list previews the real
+    // applicant order: one step per section, placed where the section first
+    // appears. A section that appears in two separate blocks is flagged, since
+    // the applicant sees both blocks merged into the earlier step.
+    const sectionOfField = (f: CustomField) => (f.section && f.section.trim()) || DEFAULT_SECTION;
+    const firstIndexBySection = new Map<string, number>();
+    formFields.forEach((f, i) => {
+        const s = sectionOfField(f);
+        if (!firstIndexBySection.has(s)) firstIndexBySection.set(s, i);
+    });
 
     // Document requirements are now managed in the compliance catalog
     // (collectAtApplication + position), not per form — so the form builder no
@@ -1700,9 +1737,76 @@ export function JobsTab() {
                                 
                                 {formFields.length > 0 && (
                                     <div className="space-y-2 bg-white dark:bg-black/25 p-4 rounded-2xl border border-slate-200 dark:border-white/[0.06]">
-                                        {formFields.map((field, idx) => (
-                                            <div key={idx} className="flex items-start justify-between gap-3 text-xs bg-slate-100/85 dark:bg-white/[0.03] border border-slate-200 dark:border-white/[0.06] p-3 rounded-xl">
-                                                <div className="min-w-0 space-y-1.5">
+                                        <p className="text-[10px] text-slate-500 dark:text-slate-500">
+                                            Drag the handle (or use the arrows) to reorder. Applicants see the questions in this
+                                            order, and sections appear in the order their first question appears.
+                                        </p>
+                                        {formFields.map((field, idx) => {
+                                            const rowSection = sectionOfField(field);
+                                            const startsBlock = idx === 0 || sectionOfField(formFields[idx - 1]) !== rowSection;
+                                            // A second block for a section the applicant already saw earlier.
+                                            const isSplitBlock = startsBlock && (firstIndexBySection.get(rowSection) ?? idx) < idx;
+                                            return (
+                                            <div key={`${field.name}-${idx}`}>
+                                            {startsBlock && (
+                                                <div className={`flex items-center gap-2 flex-wrap px-1 ${idx === 0 ? 'pb-1.5' : 'pt-3 pb-1.5'}`}>
+                                                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Step</span>
+                                                    <span className="text-[11px] font-black text-slate-700 dark:text-slate-200">{rowSection}</span>
+                                                    {isSplitBlock && (
+                                                        <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                                            Split — applicants see these merged into the earlier “{rowSection}” step
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
+                                            <div
+                                                draggable={armedDragIdx === idx}
+                                                onDragStart={e => { setDragFieldIdx(idx); e.dataTransfer.effectAllowed = 'move'; }}
+                                                onDragEnd={() => { setDragFieldIdx(null); setDragOverFieldIdx(null); setArmedDragIdx(null); }}
+                                                onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverFieldIdx !== idx) setDragOverFieldIdx(idx); }}
+                                                onDrop={e => { e.preventDefault(); handleFieldDrop(idx); }}
+                                                className={`flex items-start gap-3 text-xs bg-slate-100/85 dark:bg-white/[0.03] border p-3 rounded-xl transition-all ${
+                                                    dragFieldIdx === idx
+                                                        ? 'opacity-40 border-cyan-500/60'
+                                                        : dragOverFieldIdx === idx && dragFieldIdx !== null
+                                                            ? 'border-cyan-500 ring-2 ring-cyan-500/30'
+                                                            : 'border-slate-200 dark:border-white/[0.06]'
+                                                }`}
+                                            >
+                                                <div className="shrink-0 flex items-center gap-1 pt-0.5">
+                                                    <span
+                                                        onMouseDown={() => setArmedDragIdx(idx)}
+                                                        onMouseUp={() => setArmedDragIdx(null)}
+                                                        title="Drag to reorder"
+                                                        className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                                                    >
+                                                        <GripVertical className="h-4 w-4" />
+                                                    </span>
+                                                    <span className="w-4 text-center text-[10px] font-bold text-slate-400 dark:text-slate-500">{idx + 1}</span>
+                                                    <div className="flex flex-col -space-y-0.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => moveField(idx, idx - 1)}
+                                                            disabled={idx === 0}
+                                                            title="Move up"
+                                                            aria-label={`Move ${field.label} up`}
+                                                            className="text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-300 disabled:opacity-25 disabled:hover:text-slate-400"
+                                                        >
+                                                            <ChevronUp className="h-3.5 w-3.5" />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => moveField(idx, idx + 1)}
+                                                            disabled={idx === formFields.length - 1}
+                                                            title="Move down"
+                                                            aria-label={`Move ${field.label} down`}
+                                                            className="text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-300 disabled:opacity-25 disabled:hover:text-slate-400"
+                                                        >
+                                                            <ChevronDown className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div className="min-w-0 flex-1 space-y-1.5">
                                                     <div className="flex items-center gap-2 flex-wrap">
                                                         <span className="font-bold text-slate-800 dark:text-slate-200 text-[13px]">{field.label}</span>
                                                         <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide bg-slate-200/70 dark:bg-white/[0.06] text-slate-500 dark:text-slate-400 border border-slate-300/60 dark:border-white/[0.08]">{field.type}</span>
@@ -1742,7 +1846,9 @@ export function JobsTab() {
                                                     Remove
                                                 </button>
                                             </div>
-                                        ))}
+                                            </div>
+                                            );
+                                        })}
                                     </div>
                                 )}
 
