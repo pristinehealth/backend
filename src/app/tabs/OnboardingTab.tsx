@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
     Loader2, Plus, Trash2, X, Search, ClipboardList, UserCheck, Eye, CheckCircle2, Edit, ChevronLeft, ChevronRight, FileText, Download,
-    GripVertical, ChevronUp, ChevronDown,
+    GripVertical, ChevronUp, ChevronDown, RotateCcw,
 } from "lucide-react";
 import { resolveFieldType, toDateInputValue } from "@/lib/formFields";
 import { downloadOnboardingPdf, toOnboardingPdfData } from "@/lib/pdf/onboarding";
@@ -27,6 +27,19 @@ interface OnboardingForm {
 
 type OnboardingStatus = 'not_started' | 'in_progress' | 'completed';
 
+// One assigned questionnaire within a candidate's packet.
+interface PacketItem {
+    _id: string; // onboarding response id
+    onboardingFormId: string;
+    formName: string;
+    status: 'in_progress' | 'completed';
+    answeredCount: number;
+    totalCount: number;
+    requiredCount: number;
+    completedAt: string | null;
+    updatedAt: string;
+}
+
 interface OnboardingRow {
     _id: string; // application id
     applicantName: string;
@@ -34,8 +47,11 @@ interface OnboardingRow {
     jobId: string;
     jobTitle: string;
     acceptedAt: string;
+    // Rolled up from the packet by src/lib/onboardingProgress — a candidate is
+    // only 'completed' once every assigned questionnaire is complete.
     onboardingStatus: OnboardingStatus;
-    onboarding: { _id: string; status: string } | null;
+    progress: { status: OnboardingStatus; done: number; total: number; answered: number; answerable: number; percent: number };
+    onboarding: PacketItem[];
 }
 
 const DEFAULT_SECTION = 'Onboarding questions';
@@ -93,10 +109,13 @@ export function OnboardingTab() {
     const [jobOptions, setJobOptions] = useState<{ _id: string; title: string }[]>([]);
     const pageSize = 20;
 
-    // ── Start-onboarding modal ────────────────────────────────────────────
+    // ── Assign-questionnaires modal ───────────────────────────────────────
     const [startRow, setStartRow] = useState<OnboardingRow | null>(null);
-    const [pickFormId, setPickFormId] = useState("");
+    const [pickFormIds, setPickFormIds] = useState<string[]>([]);
     const [starting, setStarting] = useState(false);
+    // Candidate rows whose packet is expanded, keyed by application id.
+    const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
+    const [removingId, setRemovingId] = useState<string | null>(null);
 
     // ── Answer editor modal ───────────────────────────────────────────────
     const [editorId, setEditorId] = useState<string | null>(null);
@@ -285,27 +304,61 @@ export function OnboardingTab() {
     };
 
     // ── Candidate handlers ────────────────────────────────────────────────
-    const handleStartOnboarding = async () => {
-        if (!startRow || !pickFormId) return;
+    // Assigns every checked questionnaire in one request. Opening the editor
+    // afterwards only makes sense for a single pick — with several assigned the
+    // admin chooses which to fill in from the expanded packet.
+    const handleAssignQuestionnaires = async () => {
+        if (!startRow || pickFormIds.length === 0) return;
         setStarting(true);
         try {
             const res = await fetch('/api/admin/onboarding', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ applicationId: startRow._id, onboardingFormId: pickFormId }),
+                body: JSON.stringify({ applicationId: startRow._id, onboardingFormIds: pickFormIds }),
             });
             const data = await res.json();
             if (!res.ok) {
-                setAlert({ title: 'Could not start', message: data?.error || 'Failed to start onboarding.' });
+                setAlert({ title: 'Could not assign', message: data?.error || 'Failed to assign questionnaires.' });
                 return;
             }
+            const applicationId = startRow._id;
+            const single = pickFormIds.length === 1;
             setStartRow(null);
-            setPickFormId("");
+            setPickFormIds([]);
+            setExpandedRows((prev) => ({ ...prev, [applicationId]: true }));
             await fetchRows();
-            if (data?.data?._id) void openEditor(data.data._id);
+            if (single && Array.isArray(data?.data) && data.data[0]?._id) void openEditor(String(data.data[0]._id));
         } finally {
             setStarting(false);
         }
+    };
+
+    // Unassigns one questionnaire from a candidate's packet, discarding whatever
+    // answers it holds. The other questionnaires are untouched.
+    const handleRemoveQuestionnaire = async (item: PacketItem, row: OnboardingRow) => {
+        const answered = item.answeredCount > 0;
+        const confirmed = window.confirm(
+            answered
+                ? `Remove "${item.formName}" from ${row.applicantName}'s onboarding? ${item.answeredCount} saved answer${item.answeredCount === 1 ? '' : 's'} will be deleted.`
+                : `Remove "${item.formName}" from ${row.applicantName}'s onboarding?`
+        );
+        if (!confirmed) return;
+        setRemovingId(item._id);
+        try {
+            const res = await fetch(`/api/admin/onboarding/${item._id}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (!res.ok) {
+                setAlert({ title: 'Could not remove', message: data?.error || 'Failed to remove questionnaire.' });
+                return;
+            }
+            await fetchRows();
+        } finally {
+            setRemovingId(null);
+        }
+    };
+
+    const toggleRow = (applicationId: string) => {
+        setExpandedRows((prev) => ({ ...prev, [applicationId]: !prev[applicationId] }));
     };
 
     const openEditor = async (responseId: string) => {
@@ -352,22 +405,31 @@ export function OnboardingTab() {
         }
     };
 
-    const saveAnswers = async (markComplete: boolean) => {
+    // `nextStatus` is only sent when the admin explicitly changes it — plain Save
+    // leaves the status alone. (It used to always send 'in_progress', so saving a
+    // completed questionnaire silently un-completed it.) Reopening with
+    // 'in_progress' clears completedAt server-side and drops the candidate's
+    // rolled-up status back to in progress.
+    const saveAnswers = async (nextStatus?: OnboardingStatus) => {
         if (!editorId) return;
         setSavingAnswers(true);
         try {
             const res = await fetch(`/api/admin/onboarding/${editorId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ answers: editorAnswers, status: markComplete ? 'completed' : 'in_progress' }),
+                body: JSON.stringify({
+                    answers: editorAnswers,
+                    ...(nextStatus ? { status: nextStatus } : {}),
+                }),
             });
             const data = await res.json();
             if (!res.ok) {
                 setAlert({ title: 'Save failed', message: data?.error || 'Could not save answers.' });
                 return;
             }
-            setEditorMeta((m) => ({ ...m, status: markComplete ? 'completed' : 'in_progress' }));
-            if (markComplete) setEditorId(null);
+            if (nextStatus) setEditorMeta((m) => ({ ...m, status: nextStatus }));
+            // Completing closes the editor; reopening keeps it open to edit.
+            if (nextStatus === 'completed') setEditorId(null);
             await fetchRows();
         } finally {
             setSavingAnswers(false);
@@ -518,29 +580,105 @@ export function OnboardingTab() {
                                 <tbody>
                                     {rows.map((row) => {
                                         const meta = STATUS_META[row.onboardingStatus];
+                                        const packet = row.onboarding || [];
+                                        const progress = row.progress || { done: 0, total: packet.length, percent: 0, answered: 0, answerable: 0, status: row.onboardingStatus };
+                                        const expanded = !!expandedRows[row._id];
                                         return (
-                                            <tr key={row._id} className="border-b last:border-0 border-border-card">
+                                            <Fragment key={row._id}>
+                                            <tr className={`border-b border-border-card ${expanded ? '' : 'last:border-0'}`}>
                                                 <td className="px-4 py-3">
-                                                    <p className="font-bold text-text-primary">{row.applicantName}</p>
-                                                    <p className="text-[11px] text-text-muted">{row.applicantEmail}</p>
+                                                    <div className="flex items-start gap-2">
+                                                        {packet.length > 0 && (
+                                                            <button
+                                                                onClick={() => toggleRow(row._id)}
+                                                                title={expanded ? 'Hide questionnaires' : 'Show questionnaires'}
+                                                                aria-label={expanded ? `Hide ${row.applicantName}'s questionnaires` : `Show ${row.applicantName}'s questionnaires`}
+                                                                aria-expanded={expanded}
+                                                                className="mt-0.5 text-text-muted hover:text-text-primary"
+                                                            >
+                                                                {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                                            </button>
+                                                        )}
+                                                        <div className={packet.length === 0 ? 'pl-6' : ''}>
+                                                            <p className="font-bold text-text-primary">{row.applicantName}</p>
+                                                            <p className="text-[11px] text-text-muted">{row.applicantEmail}</p>
+                                                        </div>
+                                                    </div>
                                                 </td>
                                                 <td className="px-4 py-3 text-text-secondary">{row.jobTitle}</td>
                                                 <td className="px-4 py-3 text-text-muted text-xs">{new Date(row.acceptedAt).toLocaleDateString()}</td>
                                                 <td className="px-4 py-3">
-                                                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${meta.cls}`}>{meta.label}</span>
+                                                    <div className="space-y-1.5 min-w-[150px]">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${meta.cls}`}>{meta.label}</span>
+                                                            {packet.length > 0 && (
+                                                                <span className="text-[11px] font-bold text-text-muted">
+                                                                    {progress.done}/{progress.total} questionnaire{progress.total === 1 ? '' : 's'}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        {packet.length > 0 && (
+                                                            <>
+                                                                <div className="h-1.5 w-full rounded-full bg-border-card overflow-hidden">
+                                                                    <div
+                                                                        className={`h-full rounded-full transition-all ${progress.percent === 100 ? 'bg-emerald-500' : 'bg-brand-primary'}`}
+                                                                        style={{ width: `${Math.min(100, Math.max(0, progress.percent))}%` }}
+                                                                    />
+                                                                </div>
+                                                                <p className="text-[10px] text-text-muted">{progress.answered}/{progress.answerable} questions answered</p>
+                                                            </>
+                                                        )}
+                                                    </div>
                                                 </td>
                                                 <td className="px-4 py-3 text-right">
-                                                    {row.onboarding ? (
-                                                        <button onClick={() => openEditor(row.onboarding!._id)} className="inline-flex items-center gap-1 text-xs font-bold text-brand-primary hover:text-brand-primary-dark">
-                                                            <Edit className="h-3.5 w-3.5" /> Open
-                                                        </button>
-                                                    ) : (
-                                                        <button onClick={() => { setStartRow(row); setPickFormId(""); }} className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg bg-brand-primary text-white hover:bg-brand-primary-dark">
-                                                            <Plus className="h-3.5 w-3.5" /> Start onboarding
-                                                        </button>
-                                                    )}
+                                                    <button
+                                                        onClick={() => { setStartRow(row); setPickFormIds([]); }}
+                                                        className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg ${packet.length > 0 ? 'ui-card-soft text-text-secondary hover:text-text-primary' : 'bg-brand-primary text-white hover:bg-brand-primary-dark'}`}
+                                                    >
+                                                        <Plus className="h-3.5 w-3.5" /> {packet.length > 0 ? 'Add questionnaire' : 'Start onboarding'}
+                                                    </button>
                                                 </td>
                                             </tr>
+                                            {expanded && packet.map((item) => {
+                                                const itemMeta = STATUS_META[item.status === 'completed' ? 'completed' : 'in_progress'];
+                                                const itemPct = item.status === 'completed'
+                                                    ? 100
+                                                    : item.totalCount > 0 ? Math.round((item.answeredCount / item.totalCount) * 100) : 0;
+                                                return (
+                                                    <tr key={item._id} className="border-b last:border-0 border-border-card bg-surface-card/40">
+                                                        <td className="px-4 py-2.5 pl-12" colSpan={3}>
+                                                            <p className="text-sm font-semibold text-text-primary">{item.formName}</p>
+                                                            <p className="text-[10px] text-text-muted">{item.answeredCount}/{item.totalCount} answered · {item.requiredCount} required</p>
+                                                        </td>
+                                                        <td className="px-4 py-2.5">
+                                                            <div className="space-y-1.5 min-w-[150px]">
+                                                                <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${itemMeta.cls}`}>{itemMeta.label}</span>
+                                                                <div className="h-1 w-full rounded-full bg-border-card overflow-hidden">
+                                                                    <div
+                                                                        className={`h-full rounded-full ${itemPct === 100 ? 'bg-emerald-500' : 'bg-brand-primary'}`}
+                                                                        style={{ width: `${Math.min(100, Math.max(0, itemPct))}%` }}
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                                                            <button onClick={() => openEditor(item._id)} className="inline-flex items-center gap-1 text-xs font-bold text-brand-primary hover:text-brand-primary-dark">
+                                                                <Edit className="h-3.5 w-3.5" /> Open
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleRemoveQuestionnaire(item, row)}
+                                                                disabled={removingId === item._id}
+                                                                title="Remove this questionnaire from the candidate"
+                                                                aria-label={`Remove ${item.formName}`}
+                                                                className="ml-3 text-rose-500 hover:text-rose-400 disabled:opacity-50"
+                                                            >
+                                                                {removingId === item._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                            </Fragment>
                                         );
                                     })}
                                 </tbody>
@@ -744,19 +882,55 @@ export function OnboardingTab() {
             {startRow && (
                 <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setStartRow(null)}>
                     <div className="bg-surface-modal border border-border-modal rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="font-black text-text-primary">Start onboarding</h3>
-                        <p className="text-xs text-text-secondary">Choose the onboarding questionnaire for <strong>{startRow.applicantName}</strong> ({startRow.jobTitle}).</p>
-                        <select value={pickFormId} onChange={(e) => setPickFormId(e.target.value)} className="ui-input w-full text-sm">
-                            <option value="">Select a questionnaire…</option>
-                            {forms.map((f) => <option key={f._id} value={f._id}>{f.name}</option>)}
-                        </select>
-                        {forms.length === 0 && <p className="text-[11px] text-amber-500">No questionnaires yet — create one in the Questionnaires tab first.</p>}
-                        <div className="flex justify-end gap-2">
-                            <button onClick={() => setStartRow(null)} className="px-4 py-2 rounded-xl text-xs font-bold ui-card-soft text-text-secondary">Cancel</button>
-                            <button onClick={handleStartOnboarding} disabled={!pickFormId || starting} className="px-5 py-2 rounded-xl text-xs font-bold bg-brand-primary text-white hover:bg-brand-primary-dark disabled:opacity-60 inline-flex items-center gap-1.5">
-                                {starting ? <><Loader2 className="h-4 w-4 animate-spin" /> Starting…</> : 'Start'}
-                            </button>
-                        </div>
+                        {(() => {
+                            const assignedIds = new Set((startRow.onboarding || []).map((i) => String(i.onboardingFormId)));
+                            const available = forms.filter((f) => !assignedIds.has(String(f._id)));
+                            return (
+                                <>
+                                    <h3 className="font-black text-text-primary">{assignedIds.size > 0 ? 'Add questionnaires' : 'Start onboarding'}</h3>
+                                    <p className="text-xs text-text-secondary">
+                                        Choose one or more questionnaires for <strong>{startRow.applicantName}</strong> ({startRow.jobTitle}).
+                                        {assignedIds.size > 0 && ` ${assignedIds.size} already assigned.`}
+                                    </p>
+                                    <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+                                        {available.map((f) => {
+                                            const checked = pickFormIds.includes(f._id);
+                                            return (
+                                                <label
+                                                    key={f._id}
+                                                    className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors ${checked ? 'border-brand-primary bg-brand-primary-muted' : 'border-border-card hover:border-brand-primary/40'}`}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={checked}
+                                                        onChange={(e) => setPickFormIds((prev) => (
+                                                            e.target.checked ? [...prev, f._id] : prev.filter((id) => id !== f._id)
+                                                        ))}
+                                                        className="mt-0.5 h-4 w-4 rounded"
+                                                    />
+                                                    <span className="min-w-0">
+                                                        <span className="block text-sm font-bold text-text-primary">{f.name}</span>
+                                                        <span className="block text-[10px] text-text-muted">{(f.customFields || []).length} question{(f.customFields || []).length === 1 ? '' : 's'}</span>
+                                                    </span>
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
+                                    {forms.length === 0 && <p className="text-[11px] text-amber-500">No questionnaires yet — create one in the Questionnaires tab first.</p>}
+                                    {forms.length > 0 && available.length === 0 && (
+                                        <p className="text-[11px] text-amber-500">Every questionnaire is already assigned to this candidate.</p>
+                                    )}
+                                    <div className="flex justify-end gap-2">
+                                        <button onClick={() => setStartRow(null)} className="px-4 py-2 rounded-xl text-xs font-bold ui-card-soft text-text-secondary">Cancel</button>
+                                        <button onClick={handleAssignQuestionnaires} disabled={pickFormIds.length === 0 || starting} className="px-5 py-2 rounded-xl text-xs font-bold bg-brand-primary text-white hover:bg-brand-primary-dark disabled:opacity-60 inline-flex items-center gap-1.5">
+                                            {starting
+                                                ? <><Loader2 className="h-4 w-4 animate-spin" /> Assigning…</>
+                                                : `Assign${pickFormIds.length > 1 ? ` ${pickFormIds.length}` : ''}`}
+                                        </button>
+                                    </div>
+                                </>
+                            );
+                        })()}
                     </div>
                 </div>
             )}
@@ -798,12 +972,20 @@ export function OnboardingTab() {
                                         {STATUS_META[(editorMeta.status as OnboardingStatus)]?.label || 'In progress'}
                                     </span>
                                     <div className="flex gap-2">
-                                        <button onClick={() => saveAnswers(false)} disabled={savingAnswers} className="px-4 py-2 rounded-xl text-xs font-bold ui-card-soft text-text-secondary disabled:opacity-60 inline-flex items-center gap-1.5">
+                                        <button onClick={() => saveAnswers()} disabled={savingAnswers} className="px-4 py-2 rounded-xl text-xs font-bold ui-card-soft text-text-secondary disabled:opacity-60 inline-flex items-center gap-1.5">
                                             {savingAnswers ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save
                                         </button>
-                                        <button onClick={() => saveAnswers(true)} disabled={savingAnswers} className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 inline-flex items-center gap-1.5">
-                                            <CheckCircle2 className="h-4 w-4" /> Mark completed
-                                        </button>
+                                        {editorMeta.status === 'completed' ? (
+                                            // Reopening puts the questionnaire back to in progress so answers
+                                            // can be corrected. The candidate's rolled-up status follows.
+                                            <button onClick={() => saveAnswers('in_progress')} disabled={savingAnswers} className="px-5 py-2 rounded-xl text-xs font-bold border border-amber-500/40 text-amber-500 hover:bg-amber-500/10 disabled:opacity-60 inline-flex items-center gap-1.5">
+                                                <RotateCcw className="h-4 w-4" /> Reopen
+                                            </button>
+                                        ) : (
+                                            <button onClick={() => saveAnswers('completed')} disabled={savingAnswers} className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 inline-flex items-center gap-1.5">
+                                                <CheckCircle2 className="h-4 w-4" /> Mark completed
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             </>

@@ -15,6 +15,7 @@ const STEPS = [
   require('./006-materialize-application-evidence'),
   require('./007-purge-applies-to-roles'),
   require('./008-purge-position-category'),
+  require('./010-onboarding-multi-questionnaire'),
 ];
 
 async function main() {

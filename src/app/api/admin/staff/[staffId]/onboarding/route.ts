@@ -5,6 +5,7 @@ import dbConnect from '@/lib/mongoose';
 import Staff from '@/models/Staff';
 import JobApplication from '@/models/JobApplication';
 import OnboardingResponse from '@/models/OnboardingResponse';
+import { rollUpOnboarding } from '@/lib/onboardingProgress';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,14 +48,33 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             return NextResponse.json({ status: 'no_application' });
         }
 
-        const onboarding = await OnboardingResponse.findOne({ applicationId: (application as any)._id })
-            .select('_id status completedAt')
+        // A candidate can hold several questionnaires, so the badge reflects the
+        // whole packet: complete only once every assigned one is complete.
+        const packet = await OnboardingResponse.find({ applicationId: (application as any)._id })
+            .select('_id onboardingFormId formName order status answeredCount totalCount completedAt')
+            .sort({ order: 1, createdAt: 1 })
             .lean();
 
+        const progress = rollUpOnboarding(packet as any[]);
+        const lastCompletedAt = (packet as any[])
+            .map((r) => r.completedAt)
+            .filter(Boolean)
+            .sort((a: Date, b: Date) => new Date(b).getTime() - new Date(a).getTime())[0] || null;
+
         return NextResponse.json({
-            status: onboarding ? (onboarding as any).status : 'not_started',
-            onboardingId: onboarding ? String((onboarding as any)._id) : null,
-            completedAt: onboarding ? (onboarding as any).completedAt || null : null,
+            status: progress.status,
+            progress,
+            questionnaires: (packet as any[]).map((r) => ({
+                _id: String(r._id),
+                formName: r.formName || 'Questionnaire',
+                status: r.status,
+                answeredCount: r.answeredCount || 0,
+                totalCount: r.totalCount || 0,
+                completedAt: r.completedAt || null,
+            })),
+            // Kept for existing callers: the first questionnaire in the packet.
+            onboardingId: packet.length ? String((packet[0] as any)._id) : null,
+            completedAt: progress.status === 'completed' ? lastCompletedAt : null,
             applicationId: String((application as any)._id),
         });
     } catch (error: any) {
