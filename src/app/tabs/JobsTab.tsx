@@ -248,6 +248,12 @@ export function JobsTab() {
     const pendingApplicationCount = applications.filter((a) => a.status === 'pending').length;
     const [sectionLabel, setSectionLabel] = useState("");
     const [sectionContent, setSectionContent] = useState("");
+    // Drag-to-reorder state for posting sections (see the question list below for
+    // the same pattern; `armed*` gates `draggable` to the grip handle so the
+    // inline label/content inputs stay selectable).
+    const [dragSectionIdx, setDragSectionIdx] = useState<number | null>(null);
+    const [dragOverSectionIdx, setDragOverSectionIdx] = useState<number | null>(null);
+    const [armedSectionDragIdx, setArmedSectionDragIdx] = useState<number | null>(null);
 
     // New Application Form Builder State
     const [formName, setFormName] = useState("");
@@ -592,6 +598,28 @@ export function JobsTab() {
         setNewJobSections(newJobSections.filter((_, i) => i !== index));
     };
 
+    // Sections are an ordered array on the position, so editing one in place is
+    // just a patch of that entry — no need to remove and re-add to fix a typo.
+    const handleSectionChange = (index: number, patch: Partial<JobSection>) => {
+        setNewJobSections(prev => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
+    };
+
+    const moveSection = (from: number, to: number) => {
+        setNewJobSections(prev => {
+            if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+            const next = [...prev];
+            const [moved] = next.splice(from, 1);
+            next.splice(to, 0, moved);
+            return next;
+        });
+    };
+
+    const handleSectionDrop = (targetIdx: number) => {
+        if (dragSectionIdx !== null) moveSection(dragSectionIdx, targetIdx);
+        setDragSectionIdx(null);
+        setDragOverSectionIdx(null);
+    };
+
     // Upload the position's optional hero image. The returned asset is 'pending'
     // until the position is saved (the create/update route then marks it consumed).
     const handleJobImageUpload = async (file: File | null) => {
@@ -649,6 +677,133 @@ export function JobsTab() {
         </div>
     );
 
+    // Reusable sections builder shared by the create and edit position modals.
+    // Every section is editable in place and can be dragged into a new order;
+    // the public posting renders them top-to-bottom in this order.
+    const renderSectionsBuilder = () => (
+        <div className="rounded-2xl border border-slate-200 dark:border-white/[0.06] bg-slate-50/80 dark:bg-black/20 p-4 md:p-5 space-y-4">
+            <h3 className="text-sm font-black tracking-wide text-slate-900 dark:text-white">Posting Details & Sections</h3>
+
+            {newJobSections.length > 0 && (
+                <div className="space-y-2 bg-white dark:bg-black/25 p-4 rounded-2xl border border-slate-200 dark:border-white/[0.06]">
+                    <p className="text-[10px] text-slate-500 dark:text-slate-500">
+                        Edit any section directly below — changes apply when you save the position. Drag the handle
+                        (or use the arrows) to reorder; applicants see them in this order.
+                    </p>
+                    {newJobSections.map((sec, idx) => (
+                        <div
+                            key={idx}
+                            draggable={armedSectionDragIdx === idx}
+                            onDragStart={e => { setDragSectionIdx(idx); e.dataTransfer.effectAllowed = 'move'; }}
+                            onDragEnd={() => { setDragSectionIdx(null); setDragOverSectionIdx(null); setArmedSectionDragIdx(null); }}
+                            onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverSectionIdx !== idx) setDragOverSectionIdx(idx); }}
+                            onDrop={e => { e.preventDefault(); handleSectionDrop(idx); }}
+                            className={`flex items-start gap-2.5 bg-slate-100/85 dark:bg-white/[0.03] border p-3 rounded-xl transition-all ${
+                                dragSectionIdx === idx
+                                    ? 'opacity-40 border-cyan-500/60'
+                                    : dragOverSectionIdx === idx && dragSectionIdx !== null
+                                        ? 'border-cyan-500 ring-2 ring-cyan-500/30'
+                                        : 'border-slate-200 dark:border-white/[0.06]'
+                            }`}
+                        >
+                            <div className="shrink-0 flex items-center gap-1 pt-1.5">
+                                <span
+                                    onMouseDown={() => setArmedSectionDragIdx(idx)}
+                                    onMouseUp={() => setArmedSectionDragIdx(null)}
+                                    title="Drag to reorder"
+                                    className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                                >
+                                    <GripVertical className="h-4 w-4" />
+                                </span>
+                                <span className="w-4 text-center text-[10px] font-bold text-slate-400 dark:text-slate-500">{idx + 1}</span>
+                                <div className="flex flex-col -space-y-0.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => moveSection(idx, idx - 1)}
+                                        disabled={idx === 0}
+                                        title="Move up"
+                                        aria-label={`Move ${sec.label || 'section'} up`}
+                                        className="text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-300 disabled:opacity-25 disabled:hover:text-slate-400"
+                                    >
+                                        <ChevronUp className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => moveSection(idx, idx + 1)}
+                                        disabled={idx === newJobSections.length - 1}
+                                        title="Move down"
+                                        aria-label={`Move ${sec.label || 'section'} down`}
+                                        className="text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-300 disabled:opacity-25 disabled:hover:text-slate-400"
+                                    >
+                                        <ChevronDown className="h-3.5 w-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex-1 min-w-0 space-y-1.5">
+                                <input
+                                    type="text"
+                                    value={sec.label}
+                                    onChange={e => handleSectionChange(idx, { label: e.target.value })}
+                                    placeholder="Section label"
+                                    aria-label="Section label"
+                                    className="w-full text-xs font-bold bg-white dark:bg-black/30 border border-slate-200 dark:border-white/[0.08] rounded-lg px-2.5 py-1.5 text-slate-900 dark:text-white outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+                                />
+                                <textarea
+                                    value={sec.content}
+                                    onChange={e => handleSectionChange(idx, { content: e.target.value })}
+                                    rows={Math.min(12, Math.max(2, sec.content.split('\n').length))}
+                                    placeholder="Section content"
+                                    aria-label="Section content"
+                                    className="w-full text-xs leading-relaxed bg-white dark:bg-black/30 border border-slate-200 dark:border-white/[0.08] rounded-lg px-2.5 py-1.5 text-slate-700 dark:text-slate-300 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 resize-y"
+                                />
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => handleRemoveSection(idx)}
+                                className="shrink-0 text-rose-500 hover:text-rose-400 text-[11px] font-bold px-2 py-1 rounded-lg hover:bg-rose-500/10"
+                            >
+                                Remove
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            <div className="bg-white dark:bg-black/25 p-4 rounded-2xl border border-slate-200 dark:border-white/[0.06] space-y-3">
+                <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Section Label / Title</label>
+                    <input
+                        type="text"
+                        value={sectionLabel}
+                        onChange={e => setSectionLabel(e.target.value)}
+                        placeholder="e.g. Key Responsibilities, Basic Qualifications, Salary & Benefits"
+                        className="w-full text-sm bg-white dark:bg-black/40 border border-slate-300/80 dark:border-white/10 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+                    />
+                </div>
+                <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Section Content</label>
+                    <textarea
+                        rows={3}
+                        value={sectionContent}
+                        onChange={e => setSectionContent(e.target.value)}
+                        placeholder="Provide details for this section..."
+                        className="w-full text-sm bg-white dark:bg-black/40 border border-slate-300/80 dark:border-white/10 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+                    />
+                </div>
+                <div className="flex justify-end">
+                    <button
+                        type="button"
+                        onClick={handleAddSection}
+                        disabled={!sectionLabel.trim() || !sectionContent.trim()}
+                        className="bg-slate-900 hover:bg-slate-800 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] disabled:opacity-40 text-white dark:text-white font-bold text-xs px-4 py-2 rounded-xl border border-transparent dark:border-white/[0.10] transition-colors"
+                    >
+                        Add Section
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+
     const handleCreateJob = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newJobTitle || newJobSections.length === 0) {
@@ -658,7 +813,18 @@ export function JobsTab() {
             });
             return;
         }
-        
+
+        // Sections are edited in place, so re-check them here rather than only at
+        // add time — an emptied label or body should never reach the public page.
+        const cleanedSections = newJobSections.map(s => ({ label: s.label.trim(), content: s.content.trim() }));
+        if (cleanedSections.some(s => !s.label || !s.content)) {
+            setCustomAlert({
+                title: "Information",
+                message: "Every section needs a label and content. Fill in the blank ones or remove them."
+            });
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const res = await fetch('/api/admin/jobs', {
@@ -668,7 +834,7 @@ export function JobsTab() {
                     title: newJobTitle,
                     location: newJobLocation,
                     city: newJobCity,
-                    sections: newJobSections,
+                    sections: cleanedSections,
                     imageUrl: newJobImageUrl,
                     imagePublicId: newJobImagePublicId,
                 })
@@ -704,6 +870,15 @@ export function JobsTab() {
         e.preventDefault();
         if (!showEditModal || !newJobTitle || newJobSections.length === 0) return;
 
+        const cleanedSections = newJobSections.map(s => ({ label: s.label.trim(), content: s.content.trim() }));
+        if (cleanedSections.some(s => !s.label || !s.content)) {
+            setCustomAlert({
+                title: "Information",
+                message: "Every section needs a label and content. Fill in the blank ones or remove them."
+            });
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const res = await fetch(`/api/admin/jobs/${showEditModal._id}`, {
@@ -713,7 +888,7 @@ export function JobsTab() {
                     title: newJobTitle,
                     location: newJobLocation,
                     city: newJobCity,
-                    sections: newJobSections,
+                    sections: cleanedSections,
                     imageUrl: newJobImageUrl,
                     imagePublicId: newJobImagePublicId,
                 })
@@ -1416,61 +1591,8 @@ export function JobsTab() {
 
                             {renderJobImageField()}
 
-                            {/* Dynamic Sections builder */}
-                            <div className="rounded-2xl border border-slate-200 dark:border-white/[0.06] bg-slate-50/80 dark:bg-black/20 p-4 md:p-5 space-y-4">
-                                <h3 className="text-sm font-black tracking-wide text-slate-900 dark:text-white">Posting Details & Sections</h3>
-
-                                {newJobSections.length > 0 && (
-                                    <div className="space-y-2 bg-white dark:bg-black/25 p-4 rounded-2xl border border-slate-200 dark:border-white/[0.06]">
-                                        {newJobSections.map((sec, idx) => (
-                                            <div key={idx} className="bg-slate-100/85 dark:bg-white/[0.03] border border-slate-200 dark:border-white/[0.06] p-3.5 rounded-xl space-y-1.5 relative group">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleRemoveSection(idx)}
-                                                    className="absolute top-3 right-3 text-rose-500 hover:text-rose-400 text-[11px] font-bold px-2 py-1 rounded-lg hover:bg-rose-500/10"
-                                                >
-                                                    Remove
-                                                </button>
-                                                <strong className="text-xs text-slate-800 dark:text-slate-200 block pr-16">{sec.label}</strong>
-                                                <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap">{sec.content}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="bg-white dark:bg-black/25 p-4 rounded-2xl border border-slate-200 dark:border-white/[0.06] space-y-3">
-                                    <div className="space-y-1.5">
-                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Section Label / Title</label>
-                                        <input
-                                            type="text"
-                                            value={sectionLabel}
-                                            onChange={e => setSectionLabel(e.target.value)}
-                                            placeholder="e.g. Key Responsibilities, Basic Qualifications, Salary & Benefits"
-                                            className="w-full text-sm bg-white dark:bg-black/40 border border-slate-300/80 dark:border-white/10 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
-                                        />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Section Content</label>
-                                        <textarea
-                                            rows={3}
-                                            value={sectionContent}
-                                            onChange={e => setSectionContent(e.target.value)}
-                                            placeholder="Provide details for this section..."
-                                            className="w-full text-sm bg-white dark:bg-black/40 border border-slate-300/80 dark:border-white/10 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
-                                        />
-                                    </div>
-                                    <div className="flex justify-end">
-                                        <button
-                                            type="button"
-                                            onClick={handleAddSection}
-                                            disabled={!sectionLabel.trim() || !sectionContent.trim()}
-                                            className="bg-slate-900 hover:bg-slate-800 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] disabled:opacity-40 text-white dark:text-white font-bold text-xs px-4 py-2 rounded-xl border border-transparent dark:border-white/[0.10] transition-colors"
-                                        >
-                                            Add Section
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
+                            {/* Dynamic Sections builder (editable + reorderable) */}
+                            {renderSectionsBuilder()}
 
                             <div className="sticky bottom-0 flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-white/[0.07] bg-gradient-to-t from-white dark:from-slate-900 via-white/95 dark:via-slate-900/95 to-transparent">
                                 <button
@@ -1543,61 +1665,8 @@ export function JobsTab() {
 
                             {renderJobImageField()}
 
-                            {/* Dynamic Sections builder */}
-                            <div className="rounded-2xl border border-slate-200 dark:border-white/[0.06] bg-slate-50/80 dark:bg-black/20 p-4 md:p-5 space-y-4">
-                                <h3 className="text-sm font-black tracking-wide text-slate-900 dark:text-white">Posting Details & Sections</h3>
-
-                                {newJobSections.length > 0 && (
-                                    <div className="space-y-2 bg-white dark:bg-black/25 p-4 rounded-2xl border border-slate-200 dark:border-white/[0.06]">
-                                        {newJobSections.map((sec, idx) => (
-                                            <div key={idx} className="bg-slate-100/85 dark:bg-white/[0.03] border border-slate-200 dark:border-white/[0.06] p-3.5 rounded-xl space-y-1.5 relative group">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleRemoveSection(idx)}
-                                                    className="absolute top-3 right-3 text-rose-500 hover:text-rose-400 text-[11px] font-bold px-2 py-1 rounded-lg hover:bg-rose-500/10"
-                                                >
-                                                    Remove
-                                                </button>
-                                                <strong className="text-xs text-slate-800 dark:text-slate-200 block pr-16">{sec.label}</strong>
-                                                <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap">{sec.content}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="bg-white dark:bg-black/25 p-4 rounded-2xl border border-slate-200 dark:border-white/[0.06] space-y-3">
-                                    <div className="space-y-1.5">
-                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Section Label / Title</label>
-                                        <input
-                                            type="text"
-                                            value={sectionLabel}
-                                            onChange={e => setSectionLabel(e.target.value)}
-                                            placeholder="e.g. Key Responsibilities, Basic Qualifications, Salary & Benefits"
-                                            className="w-full text-sm bg-white dark:bg-black/40 border border-slate-300/80 dark:border-white/10 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
-                                        />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Section Content</label>
-                                        <textarea
-                                            rows={3}
-                                            value={sectionContent}
-                                            onChange={e => setSectionContent(e.target.value)}
-                                            placeholder="Provide details for this section..."
-                                            className="w-full text-sm bg-white dark:bg-black/40 border border-slate-300/80 dark:border-white/10 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
-                                        />
-                                    </div>
-                                    <div className="flex justify-end">
-                                        <button
-                                            type="button"
-                                            onClick={handleAddSection}
-                                            disabled={!sectionLabel.trim() || !sectionContent.trim()}
-                                            className="bg-slate-900 hover:bg-slate-800 dark:bg-white/[0.06] dark:hover:bg-white/[0.12] disabled:opacity-40 text-white dark:text-white font-bold text-xs px-4 py-2 rounded-xl border border-transparent dark:border-white/[0.10] transition-colors"
-                                        >
-                                            Add Section
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
+                            {/* Dynamic Sections builder (editable + reorderable) */}
+                            {renderSectionsBuilder()}
 
                             <div className="sticky bottom-0 flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-white/[0.07] bg-gradient-to-t from-white dark:from-slate-900 via-white/95 dark:via-slate-900/95 to-transparent">
                                 <button
@@ -1754,7 +1823,7 @@ export function JobsTab() {
                                                     <span className="text-[11px] font-black text-slate-700 dark:text-slate-200">{rowSection}</span>
                                                     {isSplitBlock && (
                                                         <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                                                            Split — applicants see these merged into the earlier “{rowSection}” step
+                                                            Split — applicants see these merged into the earlier {rowSection} step
                                                         </span>
                                                     )}
                                                 </div>
