@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
     Loader2, Plus, Trash2, X, Search, ClipboardList, UserCheck, Eye, CheckCircle2, Edit, ChevronLeft, ChevronRight, FileText, Download,
+    GripVertical, ChevronUp, ChevronDown,
 } from "lucide-react";
 import { resolveFieldType, toDateInputValue } from "@/lib/formFields";
 import { downloadOnboardingPdf, toOnboardingPdfData } from "@/lib/pdf/onboarding";
@@ -75,6 +76,11 @@ export function OnboardingTab() {
     const [fieldOptionsRaw, setFieldOptionsRaw] = useState("");
     const [fieldSection, setFieldSection] = useState(DEFAULT_SECTION);
     const [savingForm, setSavingForm] = useState(false);
+    // Drag-to-reorder state for the question list. `armedDragIdx` gates the row's
+    // `draggable` flag to the grip handle so the inline inputs stay selectable.
+    const [dragFieldIdx, setDragFieldIdx] = useState<number | null>(null);
+    const [dragOverFieldIdx, setDragOverFieldIdx] = useState<number | null>(null);
+    const [armedDragIdx, setArmedDragIdx] = useState<number | null>(null);
 
     // ── Candidates list ───────────────────────────────────────────────────
     const [rows, setRows] = useState<OnboardingRow[]>([]);
@@ -203,11 +209,47 @@ export function OnboardingTab() {
     };
     const handleRemoveField = (index: number) => setFormFields(formFields.filter((_, i) => i !== index));
 
+    // Questions render in array order in the answer editor and the PDF, so moving
+    // a row here is all that's needed to reorder — no delete-and-recreate.
+    const moveField = (from: number, to: number) => {
+        setFormFields((prev) => {
+            if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+            const next = [...prev];
+            const [moved] = next.splice(from, 1);
+            next.splice(to, 0, moved);
+            return next;
+        });
+    };
+
+    const handleFieldDrop = (targetIdx: number) => {
+        if (dragFieldIdx !== null) moveField(dragFieldIdx, targetIdx);
+        setDragFieldIdx(null);
+        setDragOverFieldIdx(null);
+    };
+
+    // Edits the wording/placement of an existing question. `name` stays fixed —
+    // saved answers are keyed by it (OnboardingResponse.answers is a Map), so
+    // renaming would orphan every answer already recorded against this form.
+    const updateField = (index: number, patch: Partial<CustomField>) => {
+        setFormFields((prev) => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)));
+    };
+
     const handleSaveForm = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!formName.trim()) return;
         if (formFields.length === 0) {
             setAlert({ title: 'No questions', message: 'Add at least one question before saving.' });
+            return;
+        }
+        // Questions are editable in place, so re-check them here rather than only
+        // at add time — a blanked-out label should never reach the questionnaire.
+        const cleanedFields = formFields.map((f) => ({
+            ...f,
+            label: f.label.trim(),
+            section: (f.section || '').trim() || DEFAULT_SECTION,
+        }));
+        if (cleanedFields.some((f) => !f.label)) {
+            setAlert({ title: 'Missing label', message: 'Every question needs a label. Fill in the blank ones or remove them.' });
             return;
         }
         setSavingForm(true);
@@ -217,7 +259,7 @@ export function OnboardingTab() {
             const res = await fetch(url, {
                 method,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: formName.trim(), customFields: formFields }),
+                body: JSON.stringify({ name: formName.trim(), customFields: cleanedFields }),
             });
             const data = await res.json();
             if (!res.ok) {
@@ -569,13 +611,97 @@ export function OnboardingTab() {
 
                             {formFields.length > 0 && (
                                 <div className="space-y-2">
+                                    <p className="text-[10px] text-text-muted">
+                                        Edit the wording, section, or required flag in place. Drag the handle (or use the arrows)
+                                        to reorder — questions are asked in this order.
+                                    </p>
                                     {formFields.map((f, i) => (
-                                        <div key={f.name} className="flex items-center justify-between gap-2 bg-surface-card border border-border-card rounded-xl px-3 py-2">
-                                            <div className="min-w-0">
-                                                <p className="text-sm font-bold text-text-primary truncate">{f.label} {f.required && <span className="text-rose-500">*</span>}</p>
-                                                <p className="text-[10px] text-text-muted">{f.name} · {f.type}{f.section ? ` · ${f.section}` : ''}</p>
+                                        <div
+                                            key={f.name}
+                                            draggable={armedDragIdx === i}
+                                            onDragStart={(e) => { setDragFieldIdx(i); e.dataTransfer.effectAllowed = 'move'; }}
+                                            onDragEnd={() => { setDragFieldIdx(null); setDragOverFieldIdx(null); setArmedDragIdx(null); }}
+                                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverFieldIdx !== i) setDragOverFieldIdx(i); }}
+                                            onDrop={(e) => { e.preventDefault(); handleFieldDrop(i); }}
+                                            className={`flex items-start gap-2 bg-surface-card border rounded-xl px-3 py-2.5 transition-all ${
+                                                dragFieldIdx === i
+                                                    ? 'opacity-40 border-brand-primary/60'
+                                                    : dragOverFieldIdx === i && dragFieldIdx !== null
+                                                        ? 'border-brand-primary ring-2 ring-brand-primary/30'
+                                                        : 'border-border-card'
+                                            }`}
+                                        >
+                                            <div className="shrink-0 flex items-center gap-1 pt-1.5">
+                                                <span
+                                                    onMouseDown={() => setArmedDragIdx(i)}
+                                                    onMouseUp={() => setArmedDragIdx(null)}
+                                                    title="Drag to reorder"
+                                                    className="cursor-grab active:cursor-grabbing text-text-muted hover:text-text-primary"
+                                                >
+                                                    <GripVertical className="h-4 w-4" />
+                                                </span>
+                                                <span className="w-4 text-center text-[10px] font-bold text-text-muted">{i + 1}</span>
+                                                <div className="flex flex-col -space-y-0.5">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => moveField(i, i - 1)}
+                                                        disabled={i === 0}
+                                                        title="Move up"
+                                                        aria-label={`Move ${f.label} up`}
+                                                        className="text-text-muted hover:text-brand-primary disabled:opacity-25 disabled:hover:text-text-muted"
+                                                    >
+                                                        <ChevronUp className="h-3.5 w-3.5" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => moveField(i, i + 1)}
+                                                        disabled={i === formFields.length - 1}
+                                                        title="Move down"
+                                                        aria-label={`Move ${f.label} down`}
+                                                        className="text-text-muted hover:text-brand-primary disabled:opacity-25 disabled:hover:text-text-muted"
+                                                    >
+                                                        <ChevronDown className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </div>
                                             </div>
-                                            <button type="button" onClick={() => handleRemoveField(i)} className="text-rose-500 text-xs font-bold shrink-0"><Trash2 className="h-4 w-4" /></button>
+                                            <div className="min-w-0 flex-1 space-y-1.5">
+                                                <input
+                                                    value={f.label}
+                                                    onChange={(e) => updateField(i, { label: e.target.value })}
+                                                    placeholder="Question label"
+                                                    aria-label="Question label"
+                                                    className="ui-input w-full text-sm font-bold py-1.5"
+                                                />
+                                                {(f.type === 'select' || f.type === 'checkbox') && (
+                                                    <input
+                                                        value={(f.options || []).join(', ')}
+                                                        onChange={(e) => updateField(i, { options: e.target.value.split(',').map((o) => o.trim()).filter(Boolean) })}
+                                                        placeholder="Options (comma separated)"
+                                                        aria-label="Options"
+                                                        className="ui-input w-full text-xs py-1.5"
+                                                    />
+                                                )}
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="text-[10px] font-mono text-text-muted">{f.name}</span>
+                                                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide bg-brand-primary-muted text-brand-primary border border-brand-primary/15">{f.type}</span>
+                                                    <input
+                                                        value={f.section || ''}
+                                                        onChange={(e) => updateField(i, { section: e.target.value })}
+                                                        placeholder={DEFAULT_SECTION}
+                                                        aria-label="Section"
+                                                        className="ui-input text-[11px] py-1 px-2 w-44"
+                                                    />
+                                                    <label className="flex items-center gap-1.5 text-[11px] font-semibold text-text-secondary cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={f.required}
+                                                            onChange={(e) => updateField(i, { required: e.target.checked })}
+                                                            className="h-3.5 w-3.5 rounded"
+                                                        /> Required
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <button type="button" onClick={() => handleRemoveField(i)} title="Remove question" aria-label={`Remove ${f.label}`} className="text-rose-500 text-xs font-bold shrink-0 pt-1.5"><Trash2 className="h-4 w-4" /></button>
                                         </div>
                                     ))}
                                 </div>
