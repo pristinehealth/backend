@@ -54,7 +54,11 @@ function TrackApplicationsInner() {
       return;
     }
     const raw = localStorage.getItem(cooldownKey(trackEmail));
-    setResendCooldown(raw ? secondsUntil(Number(raw)) : 0);
+    const remaining = raw ? secondsUntil(Number(raw)) : 0;
+    setResendCooldown(remaining);
+    // A live cooldown means a code was already mailed to this address, even if
+    // that happened in a previous mount. Reflect it so the resend label is right.
+    if (remaining > 0) setCodeSent(true);
   }, [trackEmail]);
 
   // Count the resend cooldown down to zero, one tick per second.
@@ -235,7 +239,7 @@ function TrackApplicationsInner() {
               />
               <button
                 type="submit"
-                disabled={isTracking || !codeSent || !trackEmail}
+                disabled={isTracking || !trackEmail || verificationCode.trim().length === 0}
                 className="bg-brand-primary hover:bg-brand-primary-dark disabled:opacity-60 text-white font-bold text-sm px-5 py-2.5 rounded-xl flex items-center justify-center gap-2"
               >
                 {isTracking ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Search className="h-4 w-4" /> Verify</>}
