@@ -5,7 +5,7 @@ export type OtpPurpose = 'verification' | 'reset';
 const resend = new Resend(process.env.RESEND_API_KEY);
 const FROM = process.env.EMAIL_FROM || 'noreply@staff.pristinehealthstaffing.com';
 // Where public contact-form submissions are delivered.
-const CONTACT_INBOX = process.env.CONTACT_INBOX || 'support@pristinehealthstaffing.com';
+const CONTACT_INBOX = process.env.CONTACT_INBOX || 'info@pristinehealthstaffing.com';
 
 /**
  * Deliver a public contact-form submission to the support inbox. `replyTo` is
@@ -64,7 +64,8 @@ export async function sendContactEmail(input: {
 
 /**
  * Notify the admin/recruiting inbox that a new job application was submitted.
- * Recipient: ADMIN_NOTIFICATION_EMAIL, falling back to the support/contact inbox.
+ * Recipient: ADMIN_NOTIFICATION_EMAIL, falling back to the contact inbox
+ * (info@pristinehealthstaffing.com).
  * Best-effort — callers should not let a mail failure block the submission.
  */
 export async function sendNewApplicationAdminEmail(input: {
