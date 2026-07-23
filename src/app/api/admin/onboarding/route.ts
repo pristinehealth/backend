@@ -6,6 +6,7 @@ import JobApplication from '@/models/JobApplication';
 import JobPosition from '@/models/JobPosition';
 import OnboardingForm from '@/models/OnboardingForm';
 import OnboardingResponse from '@/models/OnboardingResponse';
+import { rollUpOnboarding } from '@/lib/onboardingProgress';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,20 +46,38 @@ export async function GET(request: Request) {
             .sort({ updatedAt: -1 })
             .lean();
 
-        // Batch-load job titles and onboarding records to avoid N+1.
+        // Batch-load job titles and onboarding records to avoid N+1. A candidate
+        // may hold several questionnaires, so responses are grouped per
+        // application rather than looked up one-to-one.
         const jobIds = Array.from(new Set(applications.map((a: any) => String(a.jobId)).filter(Boolean)));
         const appIds = applications.map((a: any) => a._id);
         const [jobs, responses] = await Promise.all([
             JobPosition.find({ _id: { $in: jobIds } }).select('title').lean(),
             OnboardingResponse.find({ applicationId: { $in: appIds } })
-                .select('applicationId onboardingFormId status startedByEmail completedAt updatedAt')
+                .select('applicationId onboardingFormId formName order status answeredCount totalCount requiredCount startedByEmail completedAt createdAt updatedAt')
+                .sort({ order: 1, createdAt: 1 })
                 .lean(),
         ]);
         const jobTitleById = new Map(jobs.map((j: any) => [String(j._id), j.title]));
-        const responseByAppId = new Map(responses.map((r: any) => [String(r.applicationId), r]));
+
+        // Fill in names for records saved before `formName` existed (and for any
+        // questionnaire renamed since it was assigned).
+        const formIds = Array.from(new Set(responses.map((r: any) => String(r.onboardingFormId)).filter(Boolean)));
+        const forms = formIds.length
+            ? await OnboardingForm.find({ _id: { $in: formIds } }).select('name').lean()
+            : [];
+        const formNameById = new Map(forms.map((f: any) => [String(f._id), f.name]));
+
+        const responsesByAppId = new Map<string, any[]>();
+        for (const r of responses as any[]) {
+            const key = String(r.applicationId);
+            if (!responsesByAppId.has(key)) responsesByAppId.set(key, []);
+            responsesByAppId.get(key)!.push(r);
+        }
 
         let rows = applications.map((app: any) => {
-            const onboarding = responseByAppId.get(String(app._id)) || null;
+            const packet = responsesByAppId.get(String(app._id)) || [];
+            const progress = rollUpOnboarding(packet);
             return {
                 _id: app._id,
                 applicantName: app.applicantName,
@@ -66,16 +85,19 @@ export async function GET(request: Request) {
                 jobId: app.jobId,
                 jobTitle: jobTitleById.get(String(app.jobId)) || 'Unknown Position',
                 acceptedAt: app.updatedAt,
-                onboarding: onboarding
-                    ? {
-                          _id: onboarding._id,
-                          onboardingFormId: onboarding.onboardingFormId,
-                          status: onboarding.status,
-                          completedAt: onboarding.completedAt || null,
-                          updatedAt: onboarding.updatedAt,
-                      }
-                    : null,
-                onboardingStatus: onboarding ? onboarding.status : 'not_started',
+                onboarding: packet.map((r: any) => ({
+                    _id: r._id,
+                    onboardingFormId: r.onboardingFormId,
+                    formName: formNameById.get(String(r.onboardingFormId)) || r.formName || 'Questionnaire',
+                    status: r.status,
+                    answeredCount: r.answeredCount || 0,
+                    totalCount: r.totalCount || 0,
+                    requiredCount: r.requiredCount || 0,
+                    completedAt: r.completedAt || null,
+                    updatedAt: r.updatedAt,
+                })),
+                progress,
+                onboardingStatus: progress.status,
             };
         });
 
@@ -94,7 +116,10 @@ export async function GET(request: Request) {
     }
 }
 
-// Start onboarding for an accepted application with a chosen questionnaire.
+// Assign one or more questionnaires to an accepted application. Accepts either
+// `onboardingFormIds: string[]` or the original singular `onboardingFormId`.
+// Questionnaires already assigned to this candidate are skipped, not rejected,
+// so adding a second questionnaire to an in-flight packet is a plain re-POST.
 export async function POST(request: Request) {
     try {
         const session = await getServerSession(authOptions);
@@ -106,10 +131,13 @@ export async function POST(request: Request) {
         await dbConnect();
         const body = await request.json();
         const applicationId = (body?.applicationId || '').toString();
-        const onboardingFormId = (body?.onboardingFormId || '').toString();
+        const requestedIds: string[] = Array.isArray(body?.onboardingFormIds)
+            ? body.onboardingFormIds.map((v: any) => String(v || '')).filter(Boolean)
+            : [(body?.onboardingFormId || '').toString()].filter(Boolean);
+        const formIds = Array.from(new Set(requestedIds));
 
-        if (!applicationId || !onboardingFormId) {
-            return NextResponse.json({ error: 'applicationId and onboardingFormId are required' }, { status: 400 });
+        if (!applicationId || formIds.length === 0) {
+            return NextResponse.json({ error: 'applicationId and at least one onboardingFormId are required' }, { status: 400 });
         }
 
         const application = await JobApplication.findById(applicationId);
@@ -120,28 +148,65 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Onboarding can only be started for accepted applications.' }, { status: 400 });
         }
 
-        const form = await OnboardingForm.findById(onboardingFormId).select('_id').lean();
-        if (!form) {
-            return NextResponse.json({ error: 'Onboarding questionnaire not found' }, { status: 404 });
+        const forms = await OnboardingForm.find({ _id: { $in: formIds } }).select('_id name customFields').lean();
+        if (forms.length !== formIds.length) {
+            return NextResponse.json({ error: 'One or more onboarding questionnaires were not found' }, { status: 404 });
         }
 
-        const existing = await OnboardingResponse.findOne({ applicationId });
-        if (existing) {
-            return NextResponse.json({ error: 'Onboarding has already been started for this candidate.' }, { status: 409 });
+        const existing = await OnboardingResponse.find({ applicationId }).select('onboardingFormId order').lean();
+        const assignedIds = new Set(existing.map((r: any) => String(r.onboardingFormId)));
+        const toCreate = (forms as any[]).filter((f) => !assignedIds.has(String(f._id)));
+
+        if (toCreate.length === 0) {
+            return NextResponse.json(
+                { error: 'Those questionnaires are already assigned to this candidate.' },
+                { status: 409 }
+            );
         }
 
-        const created = await OnboardingResponse.create({
-            applicationId,
-            onboardingFormId,
-            jobId: application.jobId,
-            applicantName: application.applicantName,
-            applicantEmail: application.applicantEmail,
-            status: 'in_progress',
-            startedByEmail: session.user.email || '',
-        });
+        // Append to the end of the existing packet, preserving the order the
+        // admin picked them in.
+        let nextOrder = existing.reduce((max: number, r: any) => Math.max(max, r.order || 0), -1) + 1;
 
-        return NextResponse.json({ message: 'Onboarding started', data: created }, { status: 201 });
+        const created = await OnboardingResponse.insertMany(
+            toCreate.map((form: any) => {
+                const fields = Array.isArray(form.customFields) ? form.customFields : [];
+                return {
+                    applicationId,
+                    onboardingFormId: form._id,
+                    formName: form.name || '',
+                    order: nextOrder++,
+                    jobId: application.jobId,
+                    applicantName: application.applicantName,
+                    applicantEmail: application.applicantEmail,
+                    status: 'in_progress',
+                    answeredCount: 0,
+                    totalCount: fields.length,
+                    requiredCount: fields.filter((f: any) => f?.required).length,
+                    startedByEmail: session.user?.email || '',
+                };
+            })
+        );
+
+        const skipped = forms.length - toCreate.length;
+        return NextResponse.json(
+            {
+                message: `${created.length} questionnaire${created.length === 1 ? '' : 's'} assigned${skipped ? `, ${skipped} already assigned` : ''}`,
+                data: created,
+                skipped,
+            },
+            { status: 201 }
+        );
     } catch (error: any) {
+        // A surviving legacy `applicationId_1` unique index surfaces here as
+        // E11000 when a candidate is given a second questionnaire.
+        if (error?.code === 11000) {
+            console.error('POST /api/admin/onboarding duplicate key — is the legacy applicationId_1 unique index still present? Run migrations/010-onboarding-multi-questionnaire.js', error?.keyPattern || error?.message);
+            return NextResponse.json(
+                { error: 'This candidate already has that questionnaire, or the database still enforces one questionnaire per candidate (migration 010 pending).' },
+                { status: 409 }
+            );
+        }
         console.error('POST /api/admin/onboarding error:', error);
         return NextResponse.json({ error: 'Internal Server Error', details: error.message }, { status: 500 });
     }

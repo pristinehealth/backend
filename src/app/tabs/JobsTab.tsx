@@ -485,8 +485,12 @@ export function JobsTab() {
         setFormFields(formFields.filter((_, i) => i !== index));
     };
 
-    const handleFieldSectionChange = (index: number, section: string) => {
-        setFormFields(prev => prev.map((f, i) => (i === index ? { ...f, section } : f)));
+    // Edits an existing question in place. `name` is deliberately not patchable —
+    // submitted answers are keyed by it (JobApplication.customFieldValues is a
+    // Map), so renaming would orphan every answer already collected. Same reason
+    // `type` is fixed: stored values follow the type's shape (checkbox → array).
+    const handleFieldChange = (index: number, patch: Partial<CustomField>) => {
+        setFormFields(prev => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)));
     };
 
     // Array order IS the applicant-facing order: the apply page groups questions
@@ -529,6 +533,21 @@ export function JobsTab() {
         e.preventDefault();
         if (!formName.trim()) return;
 
+        // Questions are editable in place, so re-check them here rather than only
+        // at add time — a blanked-out label should never reach the public form.
+        const cleanedFields = formFields.map(f => ({
+            ...f,
+            label: f.label.trim(),
+            section: (f.section || '').trim() || DEFAULT_SECTION,
+        }));
+        if (cleanedFields.some(f => !f.label)) {
+            setCustomAlert({
+                title: "Information",
+                message: "Every question needs a label. Fill in the blank ones or remove them."
+            });
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const url = editingFormId ? `/api/admin/forms/${editingFormId}` : '/api/admin/forms';
@@ -539,7 +558,7 @@ export function JobsTab() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     name: formName,
-                    customFields: formFields,
+                    customFields: cleanedFields,
                     documentRequirements: formDocumentRequirements,
                     requiredDocuments: formDocumentRequirements.filter((item) => item.required).map((item) => item.documentType),
                 })
@@ -1807,8 +1826,9 @@ export function JobsTab() {
                                 {formFields.length > 0 && (
                                     <div className="space-y-2 bg-white dark:bg-black/25 p-4 rounded-2xl border border-slate-200 dark:border-white/[0.06]">
                                         <p className="text-[10px] text-slate-500 dark:text-slate-500">
-                                            Drag the handle (or use the arrows) to reorder. Applicants see the questions in this
-                                            order, and sections appear in the order their first question appears.
+                                            Edit the wording, options, section, or required flag in place. Drag the handle (or use
+                                            the arrows) to reorder — applicants see the questions in this order, and sections
+                                            appear in the order their first question appears.
                                         </p>
                                         {formFields.map((field, idx) => {
                                             const rowSection = sectionOfField(field);
@@ -1876,14 +1896,26 @@ export function JobsTab() {
                                                     </div>
                                                 </div>
                                                 <div className="min-w-0 flex-1 space-y-1.5">
+                                                    <input
+                                                        type="text"
+                                                        value={field.label}
+                                                        onChange={e => handleFieldChange(idx, { label: e.target.value })}
+                                                        placeholder="Question label"
+                                                        aria-label="Question label"
+                                                        className="w-full text-[13px] font-bold bg-white dark:bg-black/30 border border-slate-200 dark:border-white/[0.08] rounded-lg px-2.5 py-1.5 text-slate-900 dark:text-white outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+                                                    />
+                                                    {(field.type === 'select' || field.type === 'checkbox') && (
+                                                        <input
+                                                            type="text"
+                                                            value={(field.options || []).join(', ')}
+                                                            onChange={e => handleFieldChange(idx, { options: e.target.value.split(',').map(o => o.trim()).filter(Boolean) })}
+                                                            placeholder="Options (comma separated)"
+                                                            aria-label="Options"
+                                                            className="w-full text-[11px] bg-white dark:bg-black/30 border border-slate-200 dark:border-white/[0.08] rounded-lg px-2.5 py-1.5 text-slate-700 dark:text-slate-300 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+                                                        />
+                                                    )}
                                                     <div className="flex items-center gap-2 flex-wrap">
-                                                        <span className="font-bold text-slate-800 dark:text-slate-200 text-[13px]">{field.label}</span>
                                                         <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide bg-slate-200/70 dark:bg-white/[0.06] text-slate-500 dark:text-slate-400 border border-slate-300/60 dark:border-white/[0.08]">{field.type}</span>
-                                                        {field.required ? (
-                                                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/20">Required</span>
-                                                        ) : (
-                                                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-slate-200/60 dark:bg-white/[0.04] text-slate-500 dark:text-slate-500 border border-slate-300/50 dark:border-white/[0.06]">Optional</span>
-                                                        )}
                                                         <span className="text-slate-400 dark:text-slate-500 font-mono text-[10px]">{field.name}</span>
                                                         <span className="inline-flex items-center gap-1">
                                                             <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">Section</span>
@@ -1891,21 +1923,20 @@ export function JobsTab() {
                                                                 type="text"
                                                                 list="form-section-suggestions"
                                                                 value={field.section || ''}
-                                                                onChange={e => handleFieldSectionChange(idx, e.target.value)}
+                                                                onChange={e => handleFieldChange(idx, { section: e.target.value })}
                                                                 placeholder={DEFAULT_SECTION}
                                                                 className="w-36 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20 outline-none focus:ring-1 focus:ring-cyan-500/40"
                                                             />
                                                         </span>
+                                                        <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-400 cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={field.required}
+                                                                onChange={e => handleFieldChange(idx, { required: e.target.checked })}
+                                                                className="h-3.5 w-3.5 rounded"
+                                                            /> Required
+                                                        </label>
                                                     </div>
-                                                    {Array.isArray(field.options) && field.options.length > 0 && (
-                                                        <div className="flex flex-wrap gap-1">
-                                                            {field.options.map((opt, i) => (
-                                                                <span key={i} className="px-2 py-0.5 rounded-md text-[10px] bg-white dark:bg-black/30 border border-slate-200 dark:border-white/[0.08] text-slate-600 dark:text-slate-300">
-                                                                    {opt}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    )}
                                                 </div>
                                                 <button
                                                     type="button"

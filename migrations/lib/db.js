@@ -15,7 +15,7 @@
 require('dotenv').config({ path: '.env' });
 const mongoose = require('mongoose');
 
-const MONGODB_URI = '';
+const MONGODB_URI = process.env.MONGO_URI || '';
 if (!MONGODB_URI) {
   console.error('[migration] Missing required environment variable MONGO_URI');
   process.exit(1);
