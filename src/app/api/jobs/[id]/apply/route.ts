@@ -9,13 +9,24 @@ import { type DocumentType } from '@/models/ApplicationDocument';
 import { requiresFileUpload, getDocumentLabel, metadataValueError } from '@/lib/documentMetadata';
 import { getApplicationDocumentRequirements } from '@/lib/compliance';
 import { resolveFileReference } from '@/lib/uploadResolve';
-import { sendNewApplicationAdminEmail } from '@/lib/mailer';
+import { sendNewApplicationAdminEmail, sendApplicationReceivedEmail } from '@/lib/mailer';
+import { createApplicationAccessLinkToken } from '@/lib/applicationAccess';
 import Settings from '@/models/Settings';
 
 export const dynamic = 'force-dynamic';
 
 function generateInternalReference(): string {
     return `${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+}
+
+// Deep link straight to this application, pre-authenticated with a signed access
+// token so the applicant lands on it without requesting a code. Mirrors the
+// status-change emails; returns undefined when no signing secret is configured.
+function buildTrackingUrl(applicationId: string, email: string): string | undefined {
+    const token = createApplicationAccessLinkToken(email);
+    if (!token) return undefined;
+    const base = (process.env.PUBLIC_BASE_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000').replace(/\/$/, '');
+    return `${base}/jobs/track/${applicationId}?email=${encodeURIComponent(email)}&token=${encodeURIComponent(token)}`;
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -238,6 +249,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             }
         } catch (mailErr: any) {
             console.error('[Apply] Failed to send admin notification email:', mailErr?.message || mailErr);
+        }
+
+        // Confirm receipt to the applicant, with a one-click link to their
+        // application. Gated by its own toggle and best-effort, so a mail failure
+        // never blocks the submit. Independent of the admin toggle above.
+        try {
+            const setting = await Settings.findOne({ key: 'app_notify_applicant_received' }).lean();
+            const shouldNotify = (setting as any)?.value !== 'false';
+            if (shouldNotify) {
+                await sendApplicationReceivedEmail(
+                    applicantEmail,
+                    normalizedApplicantName,
+                    job.title || 'Job Position',
+                    buildTrackingUrl(String(application._id), applicantEmail)
+                );
+            }
+        } catch (mailErr: any) {
+            console.error('[Apply] Failed to send applicant confirmation email:', mailErr?.message || mailErr);
         }
 
         return NextResponse.json({
