@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import { signedFetchUrl } from '@/lib/cloudinary';
+import { fetchStoredFile } from '@/lib/cloudinary';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,12 +35,8 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: 'Unsupported file host' }, { status: 400 });
         }
 
-        let upstream = await fetch(signedFetchUrl(src));
-        if (!upstream.ok) {
-            const fallback = await fetch(src);
-            if (fallback.ok) upstream = fallback;
-        }
-        if (!upstream.ok || !upstream.body) {
+        const upstream = await fetchStoredFile(src, 'admin/file');
+        if (!upstream || !upstream.body) {
             return NextResponse.json({ error: 'Unable to retrieve file' }, { status: 502 });
         }
 
@@ -54,6 +50,7 @@ export async function GET(request: Request) {
 
         return new Response(upstream.body, { status: 200, headers });
     } catch (error: any) {
+        console.error('[admin/file] unhandled error:', error?.message || error);
         return NextResponse.json({ error: 'Internal Server Error', details: error.message }, { status: 500 });
     }
 }

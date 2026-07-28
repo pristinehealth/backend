@@ -3,7 +3,7 @@ import dbConnect from '@/lib/mongoose';
 import JobApplication from '@/models/JobApplication';
 import ApplicationDocument from '@/models/ApplicationDocument';
 import { verifyApplicationAccess } from '@/lib/applicationAccess';
-import { signedFetchUrl } from '@/lib/cloudinary';
+import { fetchStoredFile } from '@/lib/cloudinary';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,17 +56,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         }
 
         if (!/^https?:\/\//i.test(sourceUrl)) {
+            console.warn('[track/file] no stored url', { applicationId: id, documentId, field });
             return NextResponse.json({ error: 'File not found' }, { status: 404 });
         }
 
-        // Authenticated assets need a freshly signed URL; public (legacy) ones
-        // stream as-is. Fall back to the stored URL if the signed fetch fails.
-        let upstream = await fetch(signedFetchUrl(sourceUrl));
-        if (!upstream.ok) {
-            const fallback = await fetch(sourceUrl);
-            if (fallback.ok) upstream = fallback;
-        }
-        if (!upstream.ok || !upstream.body) {
+        // Resolve + fetch with full logging (see fetchStoredFile). Authenticated
+        // PDFs go via the download API; images/raw via a signed delivery URL.
+        const upstream = await fetchStoredFile(sourceUrl, 'track/file');
+        if (!upstream || !upstream.body) {
             return NextResponse.json({ error: 'Unable to retrieve file' }, { status: 502 });
         }
 

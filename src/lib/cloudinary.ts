@@ -6,6 +6,91 @@ cloudinary.config({
     secure: true,
 });
 
+// One-time diagnostic so production logs reveal whether Cloudinary credentials
+// are actually present in this environment. Signing a delivery URL AND the
+// download API both need api_key + api_secret; if these are missing/wrong in
+// prod (e.g. CLOUDINARY_URL not set there), every signed fetch 401s. Values are
+// NEVER logged — only booleans and the cloud name.
+let loggedConfigOnce = false;
+function logCloudinaryConfigOnce(ctx: string) {
+    if (loggedConfigOnce) return;
+    loggedConfigOnce = true;
+    const cfg = cloudinary.config();
+    console.log(`[cloudinary] config (${ctx})`, {
+        hasCloudinaryUrl: !!process.env.CLOUDINARY_URL,
+        cloudName: cfg.cloud_name || null,
+        hasApiKey: !!cfg.api_key,
+        hasApiSecret: !!cfg.api_secret,
+    });
+}
+
+// Redact api_key + signature before a signed URL touches a log line.
+function redact(url: string): string {
+    return url
+        .replace(/(api_key=)[^&]+/i, '$1REDACTED')
+        .replace(/(signature=)[^&]+/i, '$1REDACTED')
+        .replace(/s--[\w-]+--/i, 's--REDACTED--');
+}
+
+/**
+ * Resolve a stored file URL to a fetchable one and stream it, with detailed
+ * logging at every branch so a production failure is diagnosable. Returns the
+ * successful upstream Response, or null (caller then returns 502). Shared by all
+ * three file-proxy routes so they log identically and the fix lives in one place.
+ */
+export async function fetchStoredFile(storedUrl: string, ctx: string): Promise<Response | null> {
+    logCloudinaryConfigOnce(ctx);
+    const parsed = parseCloudinaryUrl(storedUrl);
+    const primary = signedFetchUrl(storedUrl);
+    const via = primary.includes('/download?')
+        ? 'download-api'
+        : parsed?.deliveryType === 'upload'
+            ? 'public'
+            : parsed
+                ? 'delivery-url'
+                : 'unparsed';
+    console.log(`[fileproxy:${ctx}] resolve`, {
+        resourceType: parsed?.resourceType ?? null,
+        deliveryType: parsed?.deliveryType ?? null,
+        format: parsed?.format ?? null,
+        via,
+        primaryUrl: redact(primary),
+    });
+
+    let upstream: Response | null = null;
+    try {
+        upstream = await fetch(primary);
+    } catch (err: any) {
+        console.error(`[fileproxy:${ctx}] primary fetch threw:`, err?.message || err);
+    }
+
+    if (upstream && upstream.ok) return upstream;
+
+    console.warn(`[fileproxy:${ctx}] primary not ok`, {
+        status: upstream?.status ?? 'THREW',
+        cldError: upstream?.headers.get('x-cld-error') || null,
+        contentType: upstream?.headers.get('content-type') || null,
+    });
+
+    // Fall back to the raw stored URL (works for legacy public assets; for an
+    // authenticated asset it is expected to fail, but we log it either way).
+    try {
+        const fallback = await fetch(storedUrl);
+        if (fallback.ok) {
+            console.log(`[fileproxy:${ctx}] fallback (raw stored url) ok`);
+            return fallback;
+        }
+        console.warn(`[fileproxy:${ctx}] fallback not ok`, {
+            status: fallback.status,
+            cldError: fallback.headers.get('x-cld-error') || null,
+        });
+    } catch (err: any) {
+        console.error(`[fileproxy:${ctx}] fallback fetch threw:`, err?.message || err);
+    }
+
+    return null;
+}
+
 export const uploadBase64Image = async (base64String: string, folder: string = 'signatures') => {
     try {
         // The Cloudinary Node SDK natively supports data URI upload strings
