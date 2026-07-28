@@ -18,6 +18,7 @@ export function SettingsTab() {
     const [notifyStatusChange, setNotifyStatusChange] = useState(true);
     const [notifyReviewerNotes, setNotifyReviewerNotes] = useState(true);
     const [notifyNewApplication, setNotifyNewApplication] = useState(true);
+    const [notifyApplicantReceived, setNotifyApplicantReceived] = useState(true);
     const [isSavingNotifications, setIsSavingNotifications] = useState(false);
 
     // Fetch initial cron status and notification preferences on mount
@@ -42,6 +43,7 @@ export function SettingsTab() {
                     setNotifyStatusChange(settingsData.settings['app_notify_status_change'] !== 'false');
                     setNotifyReviewerNotes(settingsData.settings['app_notify_reviewer_notes'] !== 'false');
                     setNotifyNewApplication(settingsData.settings['app_notify_new_application'] !== 'false');
+                    setNotifyApplicantReceived(settingsData.settings['app_notify_applicant_received'] !== 'false');
                 }
             })
             .catch(err => console.error("Failed to fetch settings:", err));
@@ -56,7 +58,8 @@ export function SettingsTab() {
                 body: JSON.stringify({
                     app_notify_status_change: String(notifyStatusChange),
                     app_notify_reviewer_notes: String(notifyReviewerNotes),
-                    app_notify_new_application: String(notifyNewApplication)
+                    app_notify_new_application: String(notifyNewApplication),
+                    app_notify_applicant_received: String(notifyApplicantReceived)
                 })
             });
             if (res.ok) {
@@ -349,6 +352,28 @@ export function SettingsTab() {
                                     className={cn(
                                         "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
                                         notifyNewApplication ? "translate-x-6" : "translate-x-1"
+                                    )}
+                                />
+                            </button>
+                        </div>
+
+                        <div className="flex justify-between items-center bg-slate-100 dark:bg-black/25 border border-sidebar-border p-3.5 rounded-xl">
+                            <div>
+                                <span className="text-xs font-bold text-text-primary block">Applicant Confirmation Emails</span>
+                                <span className="text-[10px] text-text-muted mt-0.5 block">Email the candidate a receipt with a link to their application when they submit.</span>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setNotifyApplicantReceived(!notifyApplicantReceived)}
+                                className={cn(
+                                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                                    notifyApplicantReceived ? "bg-emerald-500" : "bg-slate-400"
+                                )}
+                            >
+                                <span
+                                    className={cn(
+                                        "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                                        notifyApplicantReceived ? "translate-x-6" : "translate-x-1"
                                     )}
                                 />
                             </button>

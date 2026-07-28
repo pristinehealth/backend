@@ -168,6 +168,65 @@ export async function sendOtpEmail(to: string, code: string, name: string, purpo
     console.log(`[Mailer] OTP email sent to ${to} (${purpose})`);
 }
 
+/**
+ * Confirm to the applicant that we received their submission. `trackingUrl` is
+ * an optional one-click access link (valid 7 days, same mechanism as the status
+ * emails) so they can open their application without requesting a code. This is
+ * NOT the access-code email — no code is sent; tracking later uses email + OTP.
+ */
+export async function sendApplicationReceivedEmail(
+    to: string,
+    name: string,
+    jobTitle: string,
+    trackingUrl?: string
+) {
+    const apiKey = process.env.RESEND_API_KEY;
+
+    if (!apiKey) {
+        console.log(`\n========================================`);
+        console.log(`[DEV] Application Received confirmation for ${to}`);
+        console.log(`JOB: ${jobTitle}`);
+        if (trackingUrl) console.log(`ACCESS LINK: ${trackingUrl}`);
+        console.log(`========================================\n`);
+        return;
+    }
+
+    const ctaHtml = trackingUrl
+        ? `<div style="margin: 22px 0;">
+                <a href="${trackingUrl}" style="display: inline-block; background-color: #3B6BB5; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 12px 22px; border-radius: 8px;">View your application</a>
+            </div>
+            <p style="color: #666; font-size: 12px;">This secure link is unique to you and expires in 7 days. After that, you can still track your application anytime from the candidate portal using your email and a one-time code.</p>`
+        : `<p style="color: #666; font-size: 12px;">You can track your application anytime from the candidate portal using your email and a one-time code.</p>`;
+
+    const ctaText = trackingUrl
+        ? `\n\nView your application (secure link, expires in 7 days):\n${trackingUrl}`
+        : '\n\nYou can track your application anytime from the candidate portal using your email and a one-time code.';
+
+    const { error } = await resend.emails.send({
+        from: `Pristine Careers <${FROM}>`,
+        to,
+        subject: `We received your application for ${jobTitle}`,
+        text: `Hello ${name},\n\nThank you for applying for the position of ${jobTitle}. Your application has been received and our team will review it. We'll email you when its status changes.${ctaText}\n\nBest regards,\nPristine Staffing Team`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                <h2 style="color: #3B6BB5;">Application Received</h2>
+                <p>Hello ${name},</p>
+                <p>Thank you for applying for the position of <strong>${jobTitle}</strong>. Your application has been received and our team will review it.</p>
+                <p style="color: #4B5563;">We'll email you whenever your application status changes. No action is needed from you right now.</p>
+                ${ctaHtml}
+                <p style="color: #9ca3af; font-size: 12px; margin-top: 16px;">If you didn't submit this application, you can safely ignore this email.</p>
+            </div>
+        `,
+    });
+
+    if (error) {
+        console.error(`[Mailer] Resend error sending application-received email to ${to}:`, error);
+        throw new Error(`Failed to send email: ${error.message}`);
+    }
+
+    console.log(`[Mailer] Application received confirmation sent to ${to}`);
+}
+
 export async function sendApplicationAccessCodeEmail(to: string, code: string, name: string, jobTitle: string) {
     const apiKey = process.env.RESEND_API_KEY;
 
