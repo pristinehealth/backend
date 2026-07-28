@@ -17,7 +17,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { DOCUMENT_METADATA, getDefaultApplicationDocuments, getDocumentLabel, requiresFileUpload } from "@/lib/documentMetadata";
+import { DOCUMENT_METADATA, getDefaultApplicationDocuments, getDocumentLabel, requiresFileUpload, sanitizeMetadataValue, metadataInputProps } from "@/lib/documentMetadata";
 import { resolveFieldType, toDateInputValue } from "@/lib/formFields";
 import type { DocumentType } from "@/models/ApplicationDocument";
 
@@ -40,6 +40,7 @@ interface ApplicationDocument {
   deliveryMethod: 'upload' | 'email';
   fileName: string;
   fileUrl: string;
+  value?: string; // typed value for metadata-only requirements
   expiryDate?: string | null;
   status: 'pending' | 'verified' | 'rejected' | 'expired';
   uploadedAt: string;
@@ -90,7 +91,7 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
   const [applicantName, setApplicantName] = useState('');
   const [customAnswers, setCustomAnswers] = useState<Record<string, any>>({});
   const [selectedDocuments, setSelectedDocuments] = useState<DocumentType[]>([]);
-  const [documentUploads, setDocumentUploads] = useState<Record<string, { fileUrl?: string; fileName?: string; publicId?: string; deliveryMethod?: 'upload' | 'email' }>>({});
+  const [documentUploads, setDocumentUploads] = useState<Record<string, { fileUrl?: string; fileName?: string; publicId?: string; value?: string; deliveryMethod?: 'upload' | 'email' }>>({});
   const [uploadingDocuments, setUploadingDocuments] = useState<Record<string, boolean>>({});
   const [documentErrors, setDocumentErrors] = useState<Record<string, string>>({});
   const [uploadedFieldPublicIds, setUploadedFieldPublicIds] = useState<Record<string, string>>({});
@@ -161,23 +162,24 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
             required: !!DOCUMENT_METADATA[documentType]?.mandatory,
           }));
 
-      const applicantVisibleRequirements = requirements.filter((rule) => requiresFileUpload(rule.documentType));
+      // Both file AND metadata-only requirements are shown now — file docs get an
+      // upload box, metadata-only docs get a typed input (e.g. State ID, SSN).
+      const applicantVisibleRequirements = requirements;
 
       const existingDocTypes = (Array.isArray(data.documents) ? data.documents : [])
-        .map((doc: ApplicationDocument) => doc.documentType)
-        .filter((documentType: DocumentType) => requiresFileUpload(documentType));
+        .map((doc: ApplicationDocument) => doc.documentType);
       const initialSelected = Array.from(new Set([...applicantVisibleRequirements.map((item) => item.documentType), ...existingDocTypes]));
       setSelectedDocuments(initialSelected);
 
       setDocumentUploads(
         Object.fromEntries(
           (Array.isArray(data.documents) ? data.documents : [])
-            .filter((doc: ApplicationDocument) => requiresFileUpload(doc.documentType))
             .map((doc: ApplicationDocument) => [
             doc.documentType,
             {
               fileUrl: doc.fileUrl,
               fileName: doc.fileName,
+              value: doc.value || '',
               deliveryMethod: doc.deliveryMethod,
             },
           ])
@@ -208,6 +210,16 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
       }
       return [...prev, documentType];
     });
+  };
+
+  // Typed value for a metadata-only requirement (State ID, SSN, …). Sanitized on
+  // input the same way the apply form does.
+  const handleDocumentValueChange = (documentType: DocumentType, raw: string) => {
+    const clean = sanitizeMetadataValue(documentType, raw);
+    setDocumentUploads((prev) => ({
+      ...prev,
+      [documentType]: { ...prev[documentType], value: clean },
+    }));
   };
 
   const handleDocumentUpload = async (documentType: DocumentType, file: File | null) => {
@@ -324,10 +336,11 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
         documentType,
         fileUrl: documentUploads[documentType]?.fileUrl,
         fileName: documentUploads[documentType]?.fileName,
+        value: documentUploads[documentType]?.value || '',
         deliveryMethod:
           documentUploads[documentType]?.deliveryMethod ||
           (requiresFileUpload(documentType) ? 'upload' : 'email'),
-      })).filter((doc) => requiresFileUpload(doc.documentType));
+      }));
 
       const res = await fetch(`/api/applications/track/${payload.application._id}`, {
         method: 'PATCH',
@@ -656,11 +669,12 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
               <h2 className="text-sm font-black uppercase tracking-widest text-brand-primary">Submitted documents</h2>
 
               <div className="space-y-4">
-                {documentRequirements.filter((rule) => requiresFileUpload(rule.documentType)).map((rule) => {
+                {documentRequirements.map((rule) => {
                   const metadata = DOCUMENT_METADATA[rule.documentType];
                   const upload = documentUploads[rule.documentType];
                   const included = selectedDocuments.includes(rule.documentType);
                   const submittedDoc = payload.documents.find((doc) => doc.documentType === rule.documentType);
+                  const isFileDoc = requiresFileUpload(rule.documentType);
 
                   const statusClasses: Record<ApplicationDocument['status'], string> = {
                     pending: 'bg-slate-500/10 text-slate-500 border-slate-500/20',
@@ -703,6 +717,27 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
 
                       {!included ? (
                         <p className="text-xs text-text-muted">Removed from this submission.</p>
+                      ) : !isFileDoc ? (
+                        // Metadata-only requirement: a typed value (e.g. State ID,
+                        // SSN). Editable once the admin requests changes; otherwise
+                        // read-only so the applicant can still see what's now needed.
+                        canEdit ? (
+                          <div className="space-y-1.5">
+                            <input
+                              type="text"
+                              value={upload?.value || ''}
+                              onChange={(e) => handleDocumentValueChange(rule.documentType, e.target.value)}
+                              placeholder={metadataInputProps(rule.documentType).placeholder || `Enter ${getDocumentLabel(rule.documentType)}`}
+                              inputMode={metadataInputProps(rule.documentType).inputMode}
+                              maxLength={metadataInputProps(rule.documentType).maxLength}
+                              className="w-full text-sm bg-bg-input border border-border-input rounded-xl px-4 py-2.5 text-text-input outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary/50"
+                            />
+                          </div>
+                        ) : upload?.value ? (
+                          <p className="text-sm text-text-primary">Provided: <span className="font-semibold">{upload.value}</span></p>
+                        ) : (
+                          <p className="text-xs text-rose-500">Not provided yet.</p>
+                        )
                       ) : upload?.fileUrl ? (
                         <div className="flex items-center justify-between border border-border-card rounded-xl p-3">
                           <div className="min-w-0">
@@ -715,7 +750,7 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                               <Eye className="h-3 w-3" /> View file
                             </button>
                           </div>
-                          {canEdit && requiresFileUpload(rule.documentType) && (
+                          {canEdit && (
                             <button
                               type="button"
                               onClick={() => setDocumentUploads((prev) => ({ ...prev, [rule.documentType]: { ...prev[rule.documentType], fileUrl: '', fileName: '' } }))}
@@ -725,8 +760,6 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                             </button>
                           )}
                         </div>
-                      ) : !requiresFileUpload(rule.documentType) ? (
-                        <p className="text-xs text-cyan-600 dark:text-cyan-300">This document is tracked as metadata only. No file upload is required.</p>
                       ) : canEdit ? (
                         <div>
                           <input
