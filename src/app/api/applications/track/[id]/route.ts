@@ -18,19 +18,27 @@ export const dynamic = 'force-dynamic';
 type DocumentRequirement = {
   documentType: DocumentType;
   required: boolean;
+  // Authoritative file-vs-metadata flag from the requirement's configured
+  // evidenceMode — NOT the static DOCUMENT_METADATA default, which can disagree
+  // (e.g. an admin sets work_authorization to require a file even though the
+  // built-in default is metadata-only).
+  requiresFile: boolean;
 };
 
 /**
  * The documents to collect for an application come from the live compliance
  * catalog (getApplicationDocumentRequirements) — the SAME source the apply flow
  * uses — so this page and edits stay in sync with Compliance → Requirements
- * instead of a stale form snapshot. Falls through to file-upload requirements.
+ * instead of a stale form snapshot. Both file and metadata-only requirements are
+ * returned, each carrying its configured `requiresFile` flag.
  */
 async function catalogRequirements(jobId: any): Promise<DocumentRequirement[]> {
   const reqs = await getApplicationDocumentRequirements(jobId ? String(jobId) : null);
-  return reqs
-    .filter((r) => r.requiresFile)
-    .map((r) => ({ documentType: r.documentType as DocumentType, required: r.required }));
+  return reqs.map((r) => ({
+    documentType: r.documentType as DocumentType,
+    required: r.required,
+    requiresFile: r.requiresFile,
+  }));
 }
 
 async function findTrackedApplication(id: string, email: string) {
@@ -84,6 +92,14 @@ function validateDocuments(rules: DocumentRequirement[], submittedDocs: any[]) {
     .filter((doc) => doc && doc.documentType)
     .forEach((doc) => submittedByType.set(doc.documentType as DocumentType, doc));
 
+  // File-vs-metadata comes from the requirement's configured flag, not the
+  // static default. Requirements not in the catalog fall back to the static map.
+  const requiresFileByType = new Map<DocumentType, boolean>(
+    rules.map((r) => [r.documentType, r.requiresFile])
+  );
+  const isFile = (docType: DocumentType) =>
+    requiresFileByType.has(docType) ? !!requiresFileByType.get(docType) : requiresFileUpload(docType);
+
   for (const rule of rules) {
     if (!rule.required) continue;
 
@@ -94,7 +110,7 @@ function validateDocuments(rules: DocumentRequirement[], submittedDocs: any[]) {
       return `Document \"${metadata?.label || rule.documentType}\" is required`;
     }
 
-    if (requiresFileUpload(rule.documentType)) {
+    if (rule.requiresFile) {
       if (typeof submitted.fileUrl !== 'string' || typeof submitted.fileName !== 'string' || !submitted.fileUrl || !submitted.fileName) {
         return `Please upload the required ${metadata?.label || rule.documentType} document`;
       }
@@ -115,7 +131,7 @@ function validateDocuments(rules: DocumentRequirement[], submittedDocs: any[]) {
     const docType = submitted.documentType as DocumentType;
     const metadata = DOCUMENT_METADATA[docType];
 
-    if (requiresFileUpload(docType)) {
+    if (isFile(docType)) {
       if (typeof submitted.fileUrl !== 'string' || typeof submitted.fileName !== 'string' || !submitted.fileUrl || !submitted.fileName) {
         return `Selected document \"${metadata?.label || docType}\" is missing an uploaded file`;
       }
@@ -307,14 +323,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       existingDocuments.map((doc) => [doc.documentType, doc])
     );
 
+    // Authoritative file-vs-metadata per requirement (configured evidenceMode),
+    // falling back to the static default for anything outside the catalog.
+    const requiresFileByType = new Map<DocumentType, boolean>(
+      documentRequirements.map((r) => [r.documentType, r.requiresFile])
+    );
+    const docIsFile = (docType: DocumentType) =>
+      requiresFileByType.has(docType) ? !!requiresFileByType.get(docType) : requiresFileUpload(docType);
+
     const normalizedDocs = await Promise.all(submittedDocs
       .filter((doc) => doc && doc.documentType)
       // Metadata-only docs persist a typed value instead of a file; keep one only
       // when a value was actually provided (an empty optional stays unsubmitted).
-      .filter((doc) => requiresFileUpload(doc.documentType as DocumentType)
+      .filter((doc) => docIsFile(doc.documentType as DocumentType)
         || (typeof doc.value === 'string' && doc.value.trim()))
       .map(async (doc) => {
-        const isFile = requiresFileUpload(doc.documentType as DocumentType);
+        const isFile = docIsFile(doc.documentType as DocumentType);
         if (!isFile) {
           return {
             applicationId: application._id,
