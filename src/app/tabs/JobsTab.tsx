@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { downloadApplicationPdf, toApplicationPdfData } from "@/lib/pdf/application";
 import type { DocumentType } from "@/models/ApplicationDocument";
-import { DOCUMENT_METADATA, getDefaultApplicationDocuments, getDocumentLabel, requiresFileUpload, usesMetadataOnlyStorage } from "@/lib/documentMetadata";
+import { DOCUMENT_METADATA, getDefaultApplicationDocuments, getDocumentLabel, usesMetadataOnlyStorage } from "@/lib/documentMetadata";
 import { LOCATION_OPTIONS, formatLocation } from "@/lib/usStates";
 
 interface CustomField {
@@ -101,6 +101,17 @@ interface ApplicationDocument {
     status: 'pending' | 'verified' | 'rejected' | 'expired';
     uploadedAt: string;
     rejectionReason?: string;
+}
+
+// A live compliance requirement for this application (from the catalog), used to
+// surface items the applicant hasn't submitted yet — including ones added after
+// they applied. `requiresFile` is the configured evidenceMode (authoritative
+// over the static DOCUMENT_METADATA default).
+interface ApplicationRequirement {
+    documentType: DocumentType;
+    label: string;
+    required: boolean;
+    requiresFile: boolean;
 }
 
 // Standard candidate fields pre-populated for every new application form.
@@ -215,6 +226,7 @@ export function JobsTab() {
     const [showEditModal, setShowEditModal] = useState<JobPosition | null>(null);
     const [selectedApplication, setSelectedApplication] = useState<JobApplication | null>(null);
     const [selectedApplicationDocuments, setSelectedApplicationDocuments] = useState<ApplicationDocument[]>([]);
+    const [selectedApplicationRequirements, setSelectedApplicationRequirements] = useState<ApplicationRequirement[]>([]);
     const [documentExpiryDrafts, setDocumentExpiryDrafts] = useState<Record<string, string>>({});
     const [savingDocumentId, setSavingDocumentId] = useState<string | null>(null);
     const [isLoadingApplicationDocuments, setIsLoadingApplicationDocuments] = useState(false);
@@ -246,6 +258,27 @@ export function JobsTab() {
     const [uploadingJobImage, setUploadingJobImage] = useState(false);
     // New (unreviewed) applications — drives the "Applications Received" badge.
     const pendingApplicationCount = applications.filter((a) => a.status === 'pending').length;
+
+    // File-vs-metadata for a document, honoring the requirement's configured
+    // evidenceMode (authoritative) over the static DOCUMENT_METADATA default —
+    // e.g. work_authorization can be a file even though its built-in default is
+    // metadata-only. Falls back to the static map when the type isn't a current
+    // requirement (legacy/removed).
+    const applicationRequirementByType = useMemo(
+        () => new Map(selectedApplicationRequirements.map((r) => [r.documentType, r])),
+        [selectedApplicationRequirements]
+    );
+    const docIsMetadataOnly = (documentType: DocumentType) => {
+        const req = applicationRequirementByType.get(documentType);
+        if (req) return !req.requiresFile;
+        return usesMetadataOnlyStorage(documentType);
+    };
+    // Requirements the applicant hasn't submitted yet (incl. ones added after
+    // they applied) — surfaced so the reviewer sees what's still outstanding.
+    const missingApplicationRequirements = useMemo(() => {
+        const submitted = new Set(selectedApplicationDocuments.map((d) => d.documentType));
+        return selectedApplicationRequirements.filter((r) => !submitted.has(r.documentType));
+    }, [selectedApplicationRequirements, selectedApplicationDocuments]);
     const [sectionLabel, setSectionLabel] = useState("");
     const [sectionContent, setSectionContent] = useState("");
     // Drag-to-reorder state for posting sections (see the question list below for
@@ -340,6 +373,7 @@ export function JobsTab() {
 
         const docs = Array.isArray(data.documents) ? data.documents : [];
         setSelectedApplicationDocuments(docs);
+        setSelectedApplicationRequirements(Array.isArray(data.requirements) ? data.requirements : []);
         setDocumentExpiryDrafts(
             Object.fromEntries(
                 docs.map((doc: ApplicationDocument) => [
@@ -353,6 +387,7 @@ export function JobsTab() {
     useEffect(() => {
         if (!selectedApplication) {
             setSelectedApplicationDocuments([]);
+            setSelectedApplicationRequirements([]);
             setDocumentExpiryDrafts({});
             setApplicationDocumentsError("");
             return;
@@ -2274,8 +2309,8 @@ export function JobsTab() {
                                                             <div>
                                                                 <span className="text-[11px] font-bold text-text-primary uppercase block">{getDocumentLabel(doc.documentType)}</span>
                                                                 <span className="text-[10px] text-text-muted uppercase tracking-wider">{doc.deliveryMethod === 'email' ? 'Email submission' : 'Uploaded file'}</span>
-                                                                <span className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold uppercase border ${usesMetadataOnlyStorage(doc.documentType) ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'}`}>
-                                                                    {usesMetadataOnlyStorage(doc.documentType) ? 'Metadata only' : 'File upload'}
+                                                                <span className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold uppercase border ${docIsMetadataOnly(doc.documentType) ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'}`}>
+                                                                    {docIsMetadataOnly(doc.documentType) ? 'Metadata only' : 'File upload'}
                                                                 </span>
                                                             </div>
                                                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${doc.status === 'verified' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : doc.status === 'rejected' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : doc.status === 'expired' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' : 'bg-slate-500/10 text-slate-500 border-slate-500/20'}`}>
@@ -2285,13 +2320,13 @@ export function JobsTab() {
                                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                                                             <div>
                                                                 <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted block">
-                                                                    {usesMetadataOnlyStorage(doc.documentType) ? 'Recorded value' : 'File'}
+                                                                    {docIsMetadataOnly(doc.documentType) ? 'Recorded value' : 'File'}
                                                                 </span>
                                                                 {doc.fileUrl ? (
                                                                     <button type="button" onClick={() => openAdminFile(doc.fileUrl, doc.fileName || 'Document')} className="font-bold text-brand-primary hover:text-brand-primary-dark break-all transition-colors text-left inline-flex items-center gap-1">
                                                                         <Eye className="h-3.5 w-3.5 shrink-0" /> {doc.fileName || 'Open file'}
                                                                     </button>
-                                                                ) : usesMetadataOnlyStorage(doc.documentType) ? (
+                                                                ) : docIsMetadataOnly(doc.documentType) ? (
                                                                     doc.value ? (
                                                                         <span className="font-bold text-text-primary break-all">{doc.value}</span>
                                                                     ) : (
@@ -2322,7 +2357,7 @@ export function JobsTab() {
                                                                 />
                                                             </div>
                                                             <div className="flex items-center gap-2 flex-wrap md:justify-end">
-                                                                {requiresFileUpload(doc.documentType) && (
+                                                                {!docIsMetadataOnly(doc.documentType) && (
                                                                     <>
                                                                         <input
                                                                             id={`admin-upload-${doc._id}`}
@@ -2364,6 +2399,26 @@ export function JobsTab() {
                                                 ))
                                             ) : (
                                                 <div className="text-xs text-text-muted italic text-center py-4">No application documents uploaded.</div>
+                                            )}
+
+                                            {/* Requirements this applicant has not provided — including ones
+                                                added to the compliance catalog after they applied. */}
+                                            {!isLoadingApplicationDocuments && missingApplicationRequirements.length > 0 && (
+                                                <div className="pt-4 border-t border-border-card space-y-2">
+                                                    <p className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">Outstanding requirements</p>
+                                                    {missingApplicationRequirements.map((req) => (
+                                                        <div key={req.documentType} className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2">
+                                                            <div className="min-w-0">
+                                                                <span className="text-[11px] font-bold text-text-primary uppercase block">{req.label || getDocumentLabel(req.documentType)}</span>
+                                                                <span className="text-[9px] text-text-muted uppercase tracking-wider">{req.requiresFile ? 'File upload' : 'Recorded value'}</span>
+                                                            </div>
+                                                            <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold uppercase border ${req.required ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' : 'bg-white/5 text-text-secondary border-border-card'}`}>
+                                                                {req.required ? 'Required · not provided' : 'Optional · not provided'}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                    <p className="text-[10px] text-text-muted">Set the application to <span className="font-bold">Request Changes</span> to let the candidate provide these.</p>
+                                                </div>
                                             )}
                                         </div>
                                     </div>
