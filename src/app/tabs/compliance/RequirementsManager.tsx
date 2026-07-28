@@ -494,7 +494,7 @@ export function RequirementsManager() {
                 />
               </Field>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="flex items-center gap-2 text-sm text-text-primary">
                   <input
                     type="checkbox"
