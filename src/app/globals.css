@@ -126,18 +126,14 @@ body {
   --color-brand-accent-muted: var(--brand-accent-muted);
 }
 
-/* ── Utility Classes ─────────────────────────── */
-@layer utilities {
-  .ui-card {
-    background-color: var(--surface-card);
-    border: 1px solid var(--border-card);
-    color: var(--text-primary);
-  }
-  .ui-card-soft {
-    background-color: color-mix(in oklab, var(--surface-card) 92%, var(--background));
-    border: 1px solid var(--border-card);
-    color: var(--text-primary);
-  }
+/* ── Component Classes ───────────────────────────
+   These live in the `components` layer, NOT `utilities`. Tailwind orders
+   components BELOW utilities, so a per-element utility beats the base style —
+   `class="ui-input pl-9 text-xs w-44"` applies the padding, size and width as
+   written. Defined in `utilities` (as they were) they'd be emitted after
+   Tailwind's own utilities and, at equal specificity, silently win: the icon
+   padding, compact sizes and fixed widths were all being dropped. */
+@layer components {
   .ui-input {
     width: 100%;
     font-size: 0.875rem;
@@ -153,6 +149,20 @@ body {
     border-color: var(--brand-primary);
     box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand-primary) 30%, transparent);
   }
+}
+
+/* ── Utility Classes ─────────────────────────── */
+@layer utilities {
+  .ui-card {
+    background-color: var(--surface-card);
+    border: 1px solid var(--border-card);
+    color: var(--text-primary);
+  }
+  .ui-card-soft {
+    background-color: color-mix(in oklab, var(--surface-card) 92%, var(--background));
+    border: 1px solid var(--border-card);
+    color: var(--text-primary);
+  }
   .ui-subtle-action {
     background-color: color-mix(in oklab, var(--surface-card) 85%, transparent);
     border: 1px solid var(--sidebar-border);
@@ -167,6 +177,15 @@ body {
   }
   .ui-muted {
     color: var(--text-muted);
+  }
+  /* Horizontal scroll without a visible scrollbar — for pill/tab strips that
+     scroll sideways on narrow screens instead of widening the page. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
   .custom-shadow {
     box-shadow: 0 0 0 1px var(--border-card), 0 2px 20px rgba(0, 0, 0, 0.05);

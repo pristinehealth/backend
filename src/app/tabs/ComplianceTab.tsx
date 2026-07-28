@@ -38,34 +38,31 @@ export function ComplianceTab() {
         </p>
       </div>
 
-      <div className="inline-flex rounded-xl ui-card-soft p-1 gap-1">
-        <button
-          type="button"
-          onClick={() => setView("staff")}
-          className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
-            view === "staff" ? "bg-brand-primary text-white" : "text-text-secondary hover:text-text-primary"
-          }`}
-        >
-          <Users className="h-4 w-4" /> Staff compliance
-        </button>
-        <button
-          type="button"
-          onClick={() => setView("requirements")}
-          className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
-            view === "requirements" ? "bg-brand-primary text-white" : "text-text-secondary hover:text-text-primary"
-          }`}
-        >
-          <SlidersHorizontal className="h-4 w-4" /> Requirements
-        </button>
-        <button
-          type="button"
-          onClick={() => setView("retention")}
-          className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
-            view === "retention" ? "bg-brand-primary text-white" : "text-text-secondary hover:text-text-primary"
-          }`}
-        >
-          <Archive className="h-4 w-4" /> Retention
-        </button>
+      {/* Scrolls sideways instead of forcing the page wide when the three labels
+          don't fit (narrow phones); the negative margin keeps the scroll area
+          flush with the page gutter. */}
+      <div className="-mx-1 px-1 overflow-x-auto no-scrollbar">
+        <div className="inline-flex rounded-xl ui-card-soft p-1 gap-1 flex-nowrap">
+          {([
+            { id: "staff" as const, label: "Staff compliance", short: "Staff", Icon: Users },
+            { id: "requirements" as const, label: "Requirements", short: "Requirements", Icon: SlidersHorizontal },
+            { id: "retention" as const, label: "Retention", short: "Retention", Icon: Archive },
+          ]).map(({ id, label, short, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setView(id)}
+              aria-current={view === id ? "page" : undefined}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 sm:px-4 py-2 text-sm font-bold whitespace-nowrap transition-colors ${
+                view === id ? "bg-brand-primary text-white" : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">{label}</span>
+              <span className="sm:hidden">{short}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {view === "staff" && <StaffComplianceTable initialStaffId={initialStaffId} />}

@@ -121,7 +121,7 @@ export function RetentionManager() {
             (set per requirement). Preview before you clean.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => refetch()} className="inline-flex items-center gap-1.5 rounded-xl ui-card-soft px-3 py-2 text-xs font-bold text-text-secondary hover:text-text-primary">
             <RefreshCw className="h-3.5 w-3.5" /> Refresh
           </button>

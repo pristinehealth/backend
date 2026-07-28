@@ -130,6 +130,23 @@ export function parseCloudinaryUrl(url: string): ParsedCloudinaryUrl | null {
 export function signedFetchUrl(storedUrl: string): string {
     const parsed = parseCloudinaryUrl(storedUrl);
     if (!parsed || parsed.deliveryType === 'upload') return storedUrl;
+
+    // Cloudinary refuses a plain signed *delivery* URL for an authenticated (or
+    // private) PDF — it returns HTTP 401 "deny or ACL failure" because PDF
+    // delivery is restricted at the delivery endpoint. Authenticated images and
+    // raw files are NOT restricted and deliver fine, so only PDFs need special
+    // handling. The download API is exempt and returns the original bytes —
+    // exactly what our streaming proxy wants. (Verified against Cloudinary: an
+    // authenticated JPG and an authenticated raw file both return 200 via the
+    // delivery URL, while an authenticated PDF returns 401 via the delivery URL
+    // and 200 via private_download_url.)
+    if (parsed.resourceType === 'image' && parsed.format === 'pdf') {
+        return cloudinary.utils.private_download_url(parsed.publicId, parsed.format, {
+            resource_type: parsed.resourceType,
+            type: parsed.deliveryType,
+        });
+    }
+
     return cloudinary.url(parsed.publicId, {
         resource_type: parsed.resourceType,
         type: parsed.deliveryType,
