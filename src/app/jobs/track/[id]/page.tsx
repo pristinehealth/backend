@@ -24,6 +24,7 @@ import type { DocumentType } from "@/models/ApplicationDocument";
 interface DocumentRequirement {
   documentType: DocumentType;
   required: boolean;
+  requiresFile?: boolean; // configured evidenceMode; authoritative over the static default
 }
 
 interface CustomField {
@@ -199,6 +200,16 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
     [documentRequirements]
   );
 
+  // Whether a requirement collects a file vs a typed value — the requirement's
+  // configured evidenceMode wins over the static DOCUMENT_METADATA default (which
+  // can disagree, e.g. work_authorization defaults to metadata but an admin can
+  // require a file). Falls back to the static map for anything not in the catalog.
+  const docRequiresFile = (documentType: DocumentType) => {
+    const requirement = documentRequirements.find((item) => item.documentType === documentType);
+    if (typeof requirement?.requiresFile === 'boolean') return requirement.requiresFile;
+    return requiresFileUpload(documentType);
+  };
+
   const canEdit = !!payload?.canEdit;
 
   const handleDocumentToggle = (documentType: DocumentType) => {
@@ -339,7 +350,7 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
         value: documentUploads[documentType]?.value || '',
         deliveryMethod:
           documentUploads[documentType]?.deliveryMethod ||
-          (requiresFileUpload(documentType) ? 'upload' : 'email'),
+          (docRequiresFile(documentType) ? 'upload' : 'email'),
       }));
 
       const res = await fetch(`/api/applications/track/${payload.application._id}`, {
@@ -674,7 +685,7 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                   const upload = documentUploads[rule.documentType];
                   const included = selectedDocuments.includes(rule.documentType);
                   const submittedDoc = payload.documents.find((doc) => doc.documentType === rule.documentType);
-                  const isFileDoc = requiresFileUpload(rule.documentType);
+                  const isFileDoc = docRequiresFile(rule.documentType);
 
                   const statusClasses: Record<ApplicationDocument['status'], string> = {
                     pending: 'bg-slate-500/10 text-slate-500 border-slate-500/20',
