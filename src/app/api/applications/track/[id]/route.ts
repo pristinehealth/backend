@@ -5,7 +5,7 @@ import JobPosition from '@/models/JobPosition';
 import ApplicationForm from '@/models/ApplicationForm';
 import ApplicationDocument, { type DocumentType } from '@/models/ApplicationDocument';
 import UploadAsset from '@/models/UploadAsset';
-import { DOCUMENT_METADATA, requiresFileUpload } from '@/lib/documentMetadata';
+import { DOCUMENT_METADATA, requiresFileUpload, metadataValueError, sanitizeMetadataValue } from '@/lib/documentMetadata';
 import { verifyApplicationAccess } from '@/lib/applicationAccess';
 import { sanitizeApplicantNotes } from '@/lib/applicationNotes';
 import { buildDocumentFileRef, buildFieldFileRef, isFileProxyRef } from '@/lib/applicationFiles';
@@ -85,10 +85,6 @@ function validateDocuments(rules: DocumentRequirement[], submittedDocs: any[]) {
     .forEach((doc) => submittedByType.set(doc.documentType as DocumentType, doc));
 
   for (const rule of rules) {
-    if (!requiresFileUpload(rule.documentType)) {
-      continue;
-    }
-
     if (!rule.required) continue;
 
     const metadata = DOCUMENT_METADATA[rule.documentType];
@@ -102,6 +98,15 @@ function validateDocuments(rules: DocumentRequirement[], submittedDocs: any[]) {
       if (typeof submitted.fileUrl !== 'string' || typeof submitted.fileName !== 'string' || !submitted.fileUrl || !submitted.fileName) {
         return `Please upload the required ${metadata?.label || rule.documentType} document`;
       }
+    } else {
+      // Metadata-only: a typed value is required, and it must pass the same
+      // format check the apply form enforces (e.g. SSN/State ID shape).
+      const value = typeof submitted.value === 'string' ? submitted.value.trim() : '';
+      if (!value) {
+        return `Please provide the required ${metadata?.label || rule.documentType}`;
+      }
+      const fmtError = metadataValueError(rule.documentType, value);
+      if (fmtError) return fmtError;
     }
   }
 
@@ -114,6 +119,10 @@ function validateDocuments(rules: DocumentRequirement[], submittedDocs: any[]) {
       if (typeof submitted.fileUrl !== 'string' || typeof submitted.fileName !== 'string' || !submitted.fileUrl || !submitted.fileName) {
         return `Selected document \"${metadata?.label || docType}\" is missing an uploaded file`;
       }
+    } else if (typeof submitted.value === 'string' && submitted.value.trim()) {
+      // A provided optional metadata value must still be well-formed.
+      const fmtError = metadataValueError(docType, submitted.value.trim());
+      if (fmtError) return fmtError;
     }
   }
 
@@ -153,7 +162,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const documentRequirements = await catalogRequirements(application.jobId);
 
     const rawDocuments = await ApplicationDocument.find({ applicationId: application._id })
-      .select('documentType deliveryMethod fileName fileUrl expiryDate status uploadedAt rejectionReason')
+      .select('documentType deliveryMethod fileName fileUrl value expiryDate status uploadedAt rejectionReason')
       .sort({ uploadedAt: -1 })
       .lean();
 
@@ -162,7 +171,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const cred = new URLSearchParams({ email, accessToken }).toString();
     const appIdStr = String(application._id);
 
-    // Swap each document's stored URL for a same-origin proxy ref.
+    // Swap each document's stored URL for a same-origin proxy ref. `value` (the
+    // metadata-only typed value) passes through so the applicant can see/edit it.
     const documents = rawDocuments.map((doc: any) => ({
       ...doc,
       fileUrl: doc.fileUrl ? buildDocumentFileRef(appIdStr, String(doc._id), cred) : '',
@@ -299,21 +309,41 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const normalizedDocs = await Promise.all(submittedDocs
       .filter((doc) => doc && doc.documentType)
-      .filter((doc) => requiresFileUpload(doc.documentType as DocumentType))
-      .map(async (doc) => ({
-        applicationId: application._id,
-        documentType: doc.documentType as DocumentType,
-        deliveryMethod: doc.deliveryMethod === 'email' ? 'email' : 'upload',
-        // A proxy ref means "unchanged" → keep the existing stored URL. Otherwise
-        // it is a fresh upload: a publicId to resolve (or, legacy, a raw URL).
-        fileUrl: isFileProxyRef(doc.fileUrl)
-          ? (existingByType.get(doc.documentType as DocumentType)?.fileUrl || '')
-          : await resolveFileReference(doc.publicId || doc.fileUrl),
-        fileName: typeof doc.fileName === 'string' ? doc.fileName : '',
-        expiryDate: doc.expiryDate ? new Date(doc.expiryDate) : null,
-        uploadedAt: new Date(),
-        status: 'pending' as const,
-      })));
+      // Metadata-only docs persist a typed value instead of a file; keep one only
+      // when a value was actually provided (an empty optional stays unsubmitted).
+      .filter((doc) => requiresFileUpload(doc.documentType as DocumentType)
+        || (typeof doc.value === 'string' && doc.value.trim()))
+      .map(async (doc) => {
+        const isFile = requiresFileUpload(doc.documentType as DocumentType);
+        if (!isFile) {
+          return {
+            applicationId: application._id,
+            documentType: doc.documentType as DocumentType,
+            deliveryMethod: 'email' as const,
+            fileUrl: '',
+            fileName: '',
+            value: sanitizeMetadataValue(doc.documentType as DocumentType, String(doc.value || '').trim()),
+            expiryDate: null,
+            uploadedAt: new Date(),
+            status: 'pending' as const,
+          };
+        }
+        return {
+          applicationId: application._id,
+          documentType: doc.documentType as DocumentType,
+          deliveryMethod: doc.deliveryMethod === 'email' ? 'email' : 'upload',
+          // A proxy ref means "unchanged" → keep the existing stored URL. Otherwise
+          // it is a fresh upload: a publicId to resolve (or, legacy, a raw URL).
+          fileUrl: isFileProxyRef(doc.fileUrl)
+            ? (existingByType.get(doc.documentType as DocumentType)?.fileUrl || '')
+            : await resolveFileReference(doc.publicId || doc.fileUrl),
+          fileName: typeof doc.fileName === 'string' ? doc.fileName : '',
+          value: '',
+          expiryDate: doc.expiryDate ? new Date(doc.expiryDate) : null,
+          uploadedAt: new Date(),
+          status: 'pending' as const,
+        };
+      }));
 
     const submittedTypes = new Set(normalizedDocs.map((doc) => doc.documentType));
 
@@ -348,7 +378,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       const hasContentChanged =
         existingDocument.deliveryMethod !== normalizedDoc.deliveryMethod ||
         existingDocument.fileUrl !== normalizedDoc.fileUrl ||
-        existingDocument.fileName !== normalizedDoc.fileName;
+        existingDocument.fileName !== normalizedDoc.fileName ||
+        (existingDocument.value || '') !== (normalizedDoc.value || '');
 
       const shouldPreserveVerification =
         existingDocument.status === 'verified' && !hasContentChanged;
@@ -356,6 +387,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       existingDocument.deliveryMethod = normalizedDoc.deliveryMethod;
       existingDocument.fileUrl = normalizedDoc.fileUrl;
       existingDocument.fileName = normalizedDoc.fileName;
+      existingDocument.value = normalizedDoc.value;
 
       if (shouldPreserveVerification) {
         continue;
