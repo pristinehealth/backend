@@ -7,16 +7,20 @@ import {
   AlertCircle,
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Download,
   Eye,
   FileText,
   Loader2,
   Lock,
+  MessageSquare,
   Save,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
+import { PublicHeader } from "@/components/PublicHeader";
 import { DOCUMENT_METADATA, getDefaultApplicationDocuments, getDocumentLabel, requiresFileUpload, sanitizeMetadataValue, metadataInputProps } from "@/lib/documentMetadata";
 import { resolveFieldType, toDateInputValue } from "@/lib/formFields";
 import type { DocumentType } from "@/models/ApplicationDocument";
@@ -33,6 +37,20 @@ interface CustomField {
   type: 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file' | 'date';
   required: boolean;
   options?: string[];
+  section?: string;
+}
+
+// Same section grouping the apply form uses, so the submitted-data summary reads
+// with the identical section headings (Personal details, Employment details, …).
+const TRACK_LEGACY_PERSONAL = ['first_name', 'last_name', 'birth_date', 'phone', 'address', 'city', 'state', 'zip', 'country'];
+const TRACK_LEGACY_EMPLOYMENT = ['profession', 'employment_type', 'earliest_start_date', 'nursing_license_number'];
+function trackSectionOf(f: CustomField): string {
+  return (f.section && f.section.trim())
+    || (TRACK_LEGACY_PERSONAL.includes(f.name)
+      ? 'Personal details'
+      : TRACK_LEGACY_EMPLOYMENT.includes(f.name)
+        ? 'Employment details'
+        : 'Application questions');
 }
 
 interface ApplicationDocument {
@@ -88,6 +106,10 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
   const [pageError, setPageError] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
   const [payload, setPayload] = useState<TrackPayload | null>(null);
+  const [showSubmittedData, setShowSubmittedData] = useState(true);
+  // Each form section is collapsed by default; expand on click.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const [resources, setResources] = useState<Array<{ _id: string; title: string; description: string; fileName: string; downloadRef: string }>>([]);
 
   const [applicantName, setApplicantName] = useState('');
   const [customAnswers, setCustomAnswers] = useState<Record<string, any>>({});
@@ -129,6 +151,16 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
     }
 
     void fetchDetails();
+
+    // Downloadable forms library (best-effort — same access credentials).
+    (async () => {
+      try {
+        const cred = new URLSearchParams({ email, accessToken }).toString();
+        const rr = await fetch(`/api/onboarding/resources?${cred}`);
+        const rd = await rr.json();
+        if (rr.ok) setResources(Array.isArray(rd.resources) ? rd.resources : []);
+      } catch { /* ignore */ }
+    })();
   }, [id, email, accessToken]);
 
   // Close the file viewer on Escape.
@@ -199,6 +231,19 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
     () => documentRequirements.filter((item) => item.required).map((item) => item.documentType),
     [documentRequirements]
   );
+
+  // Group submitted-data fields by their form section (in first-appearance
+  // order), so the summary mirrors the application form's sections.
+  const groupedCustomFields = useMemo(() => {
+    const order: string[] = [];
+    const bySection = new Map<string, CustomField[]>();
+    for (const f of (payload?.form?.customFields || [])) {
+      const s = trackSectionOf(f);
+      if (!bySection.has(s)) { bySection.set(s, []); order.push(s); }
+      bySection.get(s)!.push(f);
+    }
+    return order.map((s) => [s, bySection.get(s)!] as [string, CustomField[]]);
+  }, [payload?.form?.customFields]);
 
   // Whether a requirement collects a file vs a typed value — the requirement's
   // configured evidenceMode wins over the static DOCUMENT_METADATA default (which
@@ -445,53 +490,36 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="max-w-6xl mx-auto px-4 py-10 space-y-8">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
+      <PublicHeader label="Application" />
+
+      {/* Branded hero */}
+      <div className="relative overflow-hidden">
+        <div className="absolute inset-0" style={{ backgroundImage: "url('/healthcare_professionals_diversity.png')", backgroundSize: 'cover', backgroundPosition: 'center 25%' }} />
+        <div className="absolute inset-0 bg-gradient-to-r from-slate-950/95 via-slate-950/85 to-slate-950/55" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/20" />
+        <div className="relative max-w-5xl mx-auto w-full px-4 sm:px-6 py-14 sm:py-20 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-text-muted font-bold">Application details</p>
-            <h1 className="text-3xl font-black text-text-primary mt-1">{payload.job.title}</h1>
-            <p className="text-sm text-text-secondary mt-2">Submitted {new Date(payload.application.createdAt).toLocaleString()}</p>
+            <p className="text-[11px] uppercase tracking-[0.25em] font-bold text-brand-primary mb-3">Application details</p>
+            <h1 className="text-3xl sm:text-4xl font-black text-white leading-tight">{payload.job.title}</h1>
+            <p className="text-sm text-white/70 mt-2">Submitted {new Date(payload.application.createdAt).toLocaleString()}</p>
           </div>
-
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex items-center px-3 py-1 rounded-full text-[11px] font-bold border uppercase ${statusClass(payload.application.status)}`}>
-              {payload.application.status.replace('_', ' ')}
-            </span>
-            <button
-              type="button"
-              onClick={() => router.push(`/jobs/track?email=${encodeURIComponent(email)}&token=${encodeURIComponent(accessToken)}`)}
-              className="text-xs font-bold px-4 py-2 rounded-xl border border-border-card bg-surface-card text-text-secondary hover:text-text-primary"
-            >
-              Back to list
-            </button>
-          </div>
+          <span className={`inline-flex items-center px-3 py-1 rounded-full text-[11px] font-bold border uppercase ${statusClass(payload.application.status)}`}>
+            {payload.application.status.replace('_', ' ')}
+          </span>
         </div>
+        <div className="absolute bottom-0 inset-x-0 h-1 bg-gradient-to-r from-brand-primary via-brand-primary to-brand-accent" />
+      </div>
 
-        {pageError && (
-          <div className="p-3 rounded-xl border border-rose-500/20 bg-rose-500/10 text-rose-500 text-sm flex items-center gap-2">
-            <AlertCircle className="h-4 w-4" />
-            {pageError}
-          </div>
-        )}
+      <div className="max-w-6xl mx-auto w-full px-4 sm:px-6 py-8 sm:py-10">
+        {pageError && (<div className="mb-4 p-3.5 rounded-xl border border-rose-500/20 bg-rose-500/10 text-rose-500 text-sm flex items-center gap-2"><AlertCircle className="h-4 w-4" />{pageError}</div>)}
+        {saveMessage && (<div className="mb-4 p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-500 text-sm flex items-center gap-2"><CheckCircle2 className="h-4 w-4" />{saveMessage}</div>)}
+        {!canEdit && (<div className="mb-4 p-3.5 rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 text-sm flex items-center gap-2"><Lock className="h-4 w-4" /> This application is read-only until our team requests changes.</div>)}
 
-        {saveMessage && (
-          <div className="p-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-500 text-sm flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4" />
-            {saveMessage}
-          </div>
-        )}
-
-        {!canEdit && (
-          <div className="p-3 rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 text-sm flex items-center gap-2">
-            <Lock className="h-4 w-4" />
-            Editing is disabled. Admin must set status to changes requested before you can update this application.
-          </div>
-        )}
-
-        <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
+        <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6 lg:gap-8 items-start">
+          {/* Main content — all sections visible, as on the application form */}
           <div className="space-y-6">
-            <section className="bg-surface-card border border-border-card rounded-2xl p-5 space-y-4">
+            <section className="bg-surface-card border border-border-card rounded-2xl p-6 shadow-sm space-y-4">
               <h2 className="text-sm font-black uppercase tracking-widest text-brand-primary">Applicant profile</h2>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -517,14 +545,36 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
               </div>
             </section>
 
-            <section className="bg-surface-card border border-border-card rounded-2xl p-5 space-y-4">
-              <h2 className="text-sm font-black uppercase tracking-widest text-brand-primary">Submitted data</h2>
+            <section className="bg-surface-card border border-border-card rounded-2xl p-6 shadow-sm space-y-4">
+              <button type="button" onClick={() => setShowSubmittedData((v) => !v)} className="w-full flex items-center justify-between gap-2 group">
+                <h2 className="text-sm font-black uppercase tracking-widest text-brand-primary">Submitted data</h2>
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-text-muted group-hover:text-text-primary">
+                  {showSubmittedData ? 'Hide' : 'Show'}
+                  {showSubmittedData ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </span>
+              </button>
 
-              {payload.form.customFields.length === 0 ? (
+              {showSubmittedData && (payload.form.customFields.length === 0 ? (
                 <p className="text-sm text-text-secondary">No additional form questions were configured for this position.</p>
               ) : (
-                <div className="space-y-4">
-                  {payload.form.customFields.map((field) => {
+                <div className="space-y-8">
+                  {groupedCustomFields.map(([sectionName, fields], sIdx) => (
+                  <div key={sectionName} className="space-y-4">
+                    <div className={sIdx === 0 ? '' : 'border-t border-sidebar-border dark:border-white/[0.06] pt-6'}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenSections((p) => ({ ...p, [sectionName]: !p[sectionName] }))}
+                        className="w-full flex items-center justify-between gap-2 group"
+                      >
+                        <h3 className="text-sm font-black uppercase text-brand-primary tracking-widest">{sectionName}</h3>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-text-muted group-hover:text-text-primary">
+                          {openSections[sectionName] ? 'Hide' : `Show (${fields.length})`}
+                          {openSections[sectionName] ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </span>
+                      </button>
+                    </div>
+                  {openSections[sectionName] && (<>
+                  {fields.map((field) => {
                     const ftype = resolveFieldType(field);
                     return (
                     <div key={field.name} className="space-y-2">
@@ -633,9 +683,9 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                                 <button
                                   type="button"
                                   onClick={() => setCustomAnswers((prev) => ({ ...prev, [field.name]: '' }))}
-                                  className="text-xs font-bold text-rose-500"
+                                  className="text-xs font-bold text-brand-primary"
                                 >
-                                  Clear
+                                  Update
                                 </button>
                               )}
                             </div>
@@ -672,11 +722,14 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                     </div>
                     );
                   })}
+                  </>)}
+                  </div>
+                  ))}
                 </div>
-              )}
+              ))}
             </section>
 
-            <section className="bg-surface-card border border-border-card rounded-2xl p-5 space-y-4">
+            <section className="bg-surface-card border border-border-card rounded-2xl p-6 shadow-sm space-y-4">
               <h2 className="text-sm font-black uppercase tracking-widest text-brand-primary">Submitted documents</h2>
 
               <div className="space-y-4">
@@ -694,8 +747,9 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                     expired: 'bg-amber-500/10 text-amber-500 border-amber-500/20',
                   };
 
+                  const isRejected = submittedDoc?.status === 'rejected';
                   return (
-                    <div key={rule.documentType} className="border border-border-card rounded-xl p-4 space-y-3 bg-surface-card">
+                    <div key={rule.documentType} className={`border rounded-xl p-4 space-y-3 ${isRejected ? 'border-rose-500/40 bg-rose-500/[0.06] ring-1 ring-rose-500/20' : 'border-border-card bg-surface-card'}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
@@ -710,8 +764,11 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                             )}
                           </div>
                           <p className="text-xs text-text-muted mt-1">{metadata?.description}</p>
-                          {submittedDoc?.status === 'rejected' && submittedDoc.rejectionReason && (
-                            <p className="text-xs text-rose-500 mt-1">Reason: {submittedDoc.rejectionReason}</p>
+                          {isRejected && (
+                            <div className="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2">
+                              <p className="text-[11px] font-black uppercase tracking-wide text-rose-500">Rejected — please re-upload</p>
+                              {submittedDoc?.rejectionReason && <p className="text-xs text-rose-500 mt-0.5">Reason: {submittedDoc.rejectionReason}</p>}
+                            </div>
                           )}
                         </div>
 
@@ -765,9 +822,9 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                             <button
                               type="button"
                               onClick={() => setDocumentUploads((prev) => ({ ...prev, [rule.documentType]: { ...prev[rule.documentType], fileUrl: '', fileName: '' } }))}
-                              className="text-xs font-bold text-rose-500"
+                              className="text-xs font-bold text-brand-primary"
                             >
-                              Clear
+                              Update
                             </button>
                           )}
                         </div>
@@ -806,13 +863,17 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
             </section>
           </div>
 
-          <aside className="space-y-6">
-            <section className="bg-surface-card border border-border-card rounded-2xl p-5 space-y-3">
-              <h2 className="text-sm font-black uppercase tracking-widest text-brand-primary">Review timeline</h2>
+          {/* Sidebar — notes always visible, plus resources and actions. */}
+          <aside className="lg:sticky lg:top-6 self-start space-y-5">
+            <section className="bg-surface-card border border-border-card rounded-2xl p-5 shadow-sm space-y-3">
+              <h2 className="text-sm font-black uppercase tracking-widest text-brand-primary flex items-center gap-1.5">
+                <MessageSquare className="h-3.5 w-3.5" /> Notes &amp; updates
+              </h2>
+              <p className="text-[11px] text-text-muted -mt-1">Messages from our review team, including any requested changes.</p>
               {(payload.application.notes || []).length > 0 ? (
-                <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-                  {payload.application.notes.map((note, index) => (
-                    <div key={`${note.createdAt}-${index}`} className="border border-border-card rounded-xl p-3 bg-surface-card">
+                <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+                  {[...payload.application.notes].reverse().map((note, index) => (
+                    <div key={`${note.createdAt}-${index}`} className="border border-border-card rounded-xl p-3 bg-surface-card/60">
                       <div className="flex items-center justify-between gap-2 text-[10px] text-text-muted">
                         <span className="font-bold">{note.author}</span>
                         <span>{new Date(note.createdAt).toLocaleDateString()}</span>
@@ -822,40 +883,40 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-text-secondary">No admin notes yet.</p>
+                <p className="text-xs text-text-secondary">No updates from our team yet.</p>
               )}
             </section>
 
-            {canEdit && (
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="w-full bg-brand-primary hover:bg-brand-primary-dark disabled:opacity-60 text-white font-bold text-sm py-3 rounded-xl flex items-center justify-center gap-2"
-              >
-                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Save updates
+            {resources.length > 0 && (
+              <section className="bg-surface-card border border-border-card rounded-2xl p-5 shadow-sm space-y-2.5">
+                <h2 className="text-sm font-black uppercase tracking-widest text-brand-primary">Forms &amp; Resources</h2>
+                {resources.map((f) => (
+                  <a key={f._id} href={f.downloadRef} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-3 border border-border-card rounded-xl p-3 hover:border-brand-primary/40 transition-colors">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-text-primary truncate">{f.title}</p>
+                      {f.description && <p className="text-[11px] text-text-muted truncate">{f.description}</p>}
+                    </div>
+                    <span className="text-xs font-bold text-brand-primary inline-flex items-center gap-1 shrink-0"><Download className="h-3.5 w-3.5" /> Download</span>
+                  </a>
+                ))}
+              </section>
+            )}
+
+            <div className="space-y-2.5">
+              {canEdit && (
+                <button type="submit" disabled={isSaving}
+                  className="w-full bg-brand-primary hover:bg-brand-primary-dark disabled:opacity-60 text-white font-bold text-sm py-3 rounded-xl flex items-center justify-center gap-2">
+                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save updates
+                </button>
+              )}
+              <button type="button" onClick={() => setShowDeleteConfirm(true)} disabled={isDeleting}
+                className="w-full border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 disabled:opacity-60 font-bold text-sm py-3 rounded-xl flex items-center justify-center gap-2">
+                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete application
               </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              disabled={isDeleting}
-              className="w-full border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 disabled:opacity-60 font-bold text-sm py-3 rounded-xl flex items-center justify-center gap-2"
-            >
-              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              Delete application
-            </button>
-
-            {!canEdit && (
-              <p className="text-xs text-text-muted">
-                This page is read-only until admin sets the application status to changes requested.
-              </p>
-            )}
-
-            <Link href="/jobs/track" className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-primary">
-              <ArrowLeft className="h-3.5 w-3.5" /> Back to tracking
-            </Link>
+              <Link href="/jobs/track" className="mt-1 inline-flex items-center gap-1.5 text-xs font-bold text-text-muted hover:text-text-primary">
+                <ArrowLeft className="h-3.5 w-3.5" /> Back to tracking
+              </Link>
+            </div>
           </aside>
         </form>
       </div>

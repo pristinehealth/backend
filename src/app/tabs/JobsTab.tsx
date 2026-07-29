@@ -330,8 +330,16 @@ export function JobsTab() {
     const [selectedFormId, setSelectedFormId] = useState("");
 
     // Review Notes State
-    const [noteText, setNoteText] = useState("");
-    const [isSavingNote, setIsSavingNote] = useState(false);
+    // Notes are no longer written free-form — they're generated from status
+    // reasons (request changes / reject) and document rejections. This prompts
+    // for that required reason.
+    const [reasonPrompt, setReasonPrompt] = useState<
+        | { kind: 'status'; id: string; status: JobApplication['status']; label: string }
+        | { kind: 'doc'; docId: string }
+        | null
+    >(null);
+    const [reasonInput, setReasonInput] = useState("");
+    const [reasonSubmitting, setReasonSubmitting] = useState(false);
 
     useEffect(() => {
         fetchData();
@@ -1043,19 +1051,21 @@ export function JobsTab() {
         }
     };
 
-    const handleStatusUpdate = async (id: string, newStatus: JobApplication['status'], label?: string) => {
+    const handleStatusUpdate = async (id: string, newStatus: JobApplication['status'], label?: string, reason?: string) => {
         try {
             const res = await fetch(`/api/admin/applications/${id}/status`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: newStatus })
+                body: JSON.stringify({ status: newStatus, ...(reason ? { note: reason } : {}) })
             });
 
             if (res.ok) {
+                const data = await res.json().catch(() => ({}));
+                const nextNotes = data?.application?.notes;
                 if (selectedApplication?._id === id) {
-                    setSelectedApplication({ ...selectedApplication, status: newStatus });
+                    setSelectedApplication({ ...selectedApplication, status: newStatus, ...(nextNotes ? { notes: nextNotes } : {}) });
                 }
-                setApplications(applications.map(app => app._id === id ? { ...app, status: newStatus } : app));
+                setApplications(applications.map(app => app._id === id ? { ...app, status: newStatus, ...(nextNotes ? { notes: nextNotes } : {}) } : app));
                 setCustomAlert({
                     title: 'Status updated',
                     message: newStatus === 'accepted'
@@ -1114,28 +1124,21 @@ export function JobsTab() {
         }
     };
 
-    const handleAddNote = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!selectedApplication || !noteText.trim()) return;
-
-        setIsSavingNote(true);
+    // Confirm the reason modal → apply the pending status change or doc rejection.
+    const submitReason = async () => {
+        if (!reasonPrompt || !reasonInput.trim()) return;
+        const reason = reasonInput.trim();
+        setReasonSubmitting(true);
         try {
-            const res = await fetch(`/api/admin/applications/${selectedApplication._id}/notes`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: noteText })
-            });
-
-            if (res.ok) {
-                const data = await res.json();
-                setSelectedApplication({ ...selectedApplication, notes: data.notes });
-                setApplications(applications.map(app => app._id === selectedApplication._id ? { ...app, notes: data.notes } : app));
-                setNoteText("");
+            if (reasonPrompt.kind === 'status') {
+                await handleStatusUpdate(reasonPrompt.id, reasonPrompt.status, reasonPrompt.label, reason);
+            } else {
+                await handleDocumentReviewAction(reasonPrompt.docId, 'reject', reason);
             }
-        } catch (err) {
-            console.error(err);
+            setReasonPrompt(null);
+            setReasonInput("");
         } finally {
-            setIsSavingNote(false);
+            setReasonSubmitting(false);
         }
     };
 
@@ -1190,6 +1193,11 @@ export function JobsTab() {
                 ...prev,
                 [docId]: updated.expiryDate ? new Date(updated.expiryDate).toISOString().split('T')[0] : "",
             }));
+            // A rejection appended a note server-side — reflect it in the notes view.
+            if (Array.isArray(data.notes) && selectedApplication) {
+                setSelectedApplication({ ...selectedApplication, notes: data.notes });
+                setApplications((prev) => prev.map((app) => app._id === selectedApplication._id ? { ...app, notes: data.notes } : app));
+            }
         } catch (err) {
             console.error(err);
             setCustomAlert({
@@ -2387,7 +2395,7 @@ export function JobsTab() {
                                                                 </button>
                                                                 <button
                                                                     type="button"
-                                                                    onClick={() => handleDocumentReviewAction(doc._id, 'reject', 'Rejected by admin')}
+                                                                    onClick={() => { setReasonInput(""); setReasonPrompt({ kind: 'doc', docId: doc._id }); }}
                                                                     disabled={savingDocumentId === doc._id}
                                                                     className="text-[10px] font-bold px-2.5 py-1 rounded-lg border border-rose-500/30 text-rose-500 hover:bg-rose-500/15 transition-colors disabled:opacity-60"
                                                                 >
@@ -2440,7 +2448,15 @@ export function JobsTab() {
                                             ]).map(cfg => (
                                                 <button
                                                     key={cfg.status}
-                                                    onClick={() => setStatusConfirm({ id: selectedApplication._id, status: cfg.status, label: cfg.label })}
+                                                    onClick={() => {
+                                                        // Requesting changes or rejecting requires a reason (→ note + email).
+                                                        if (cfg.status === 'changes_requested' || cfg.status === 'rejected') {
+                                                            setReasonInput("");
+                                                            setReasonPrompt({ kind: 'status', id: selectedApplication._id, status: cfg.status, label: cfg.label });
+                                                        } else {
+                                                            setStatusConfirm({ id: selectedApplication._id, status: cfg.status, label: cfg.label });
+                                                        }
+                                                    }}
                                                     className={`py-2 px-2 rounded-xl text-[10px] font-bold border transition-all active:scale-95 text-center flex items-center justify-center ${
                                                         selectedApplication.status === cfg.status
                                                             ? cfg.status === 'accepted' ? 'bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/20' :
@@ -2457,44 +2473,27 @@ export function JobsTab() {
                                         </div>
                                     </div>
 
-                                    {/* Review Notes Form */}
+                                    {/* Notes & History — auto-generated from status reasons
+                                        (request changes / reject) and document rejections. */}
                                     <div className="crm-panel p-5 rounded-2xl space-y-4">
                                         <h3 className="text-[11px] font-black uppercase tracking-wider text-text-muted flex items-center gap-1.5">
-                                            <MessageSquare className="h-3.5 w-3.5 text-brand-primary" /> Reviewer Notes
+                                            <MessageSquare className="h-3.5 w-3.5 text-brand-primary" /> Notes &amp; History
                                         </h3>
+                                        <p className="text-[10px] text-text-muted -mt-2">Entries are recorded automatically when you request changes, reject the application, or reject a document.</p>
 
-                                        <form onSubmit={handleAddNote} className="space-y-3">
-                                            <textarea
-                                                required
-                                                rows={3}
-                                                value={noteText}
-                                                onChange={e => setNoteText(e.target.value)}
-                                                placeholder="Add internal feedback note..."
-                                                className="ui-input w-full text-xs resize-none"
-                                            />
-                                            <button
-                                                type="submit"
-                                                disabled={isSavingNote || !noteText.trim()}
-                                                className="w-full bg-brand-primary hover:bg-brand-primary-dark disabled:opacity-50 text-white font-bold text-xs py-2.5 rounded-xl transition-all active:scale-95"
-                                            >
-                                                {isSavingNote ? "Saving..." : "Add Note"}
-                                            </button>
-                                        </form>
-
-                                        {/* Notes List */}
-                                        <div className="space-y-2 max-h-56 overflow-y-auto pt-3 border-t border-border-card">
+                                        <div className="space-y-2 max-h-72 overflow-y-auto">
                                             {selectedApplication.notes && selectedApplication.notes.length > 0 ? (
-                                                selectedApplication.notes.map((note) => (
-                                                    <div key={note._id} className="ui-card-soft p-3 rounded-xl text-xs space-y-1">
+                                                [...selectedApplication.notes].reverse().map((note, i) => (
+                                                    <div key={note._id || i} className="ui-card-soft p-3 rounded-xl text-xs space-y-1">
                                                         <div className="flex justify-between text-[9px] text-text-muted">
                                                             <span className="font-bold text-text-secondary">{note.author}</span>
                                                             <span>{new Date(note.createdAt).toLocaleDateString()}</span>
                                                         </div>
-                                                        <p className="text-text-secondary leading-normal">{note.text}</p>
+                                                        <p className="text-text-secondary leading-normal whitespace-pre-wrap">{note.text}</p>
                                                     </div>
                                                 ))
                                             ) : (
-                                                <div className="text-[10px] text-text-muted italic text-center py-4">No internal notes logged.</div>
+                                                <div className="text-[10px] text-text-muted italic text-center py-4">No notes yet.</div>
                                             )}
                                         </div>
                                     </div>
@@ -2592,6 +2591,47 @@ export function JobsTab() {
                                 }`}
                             >
                                 Confirm
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Reason prompt — required for request-changes / reject (status) and
+                document rejection. The reason becomes a note (+ email for status). */}
+            {reasonPrompt && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[65] flex items-center justify-center p-4" onClick={() => !reasonSubmitting && setReasonPrompt(null)}>
+                    <div className="bg-surface-modal border border-border-modal rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-start gap-3">
+                            <div className="h-10 w-10 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
+                                <MessageSquare className="h-5 w-5 text-rose-500" />
+                            </div>
+                            <div>
+                                <h3 className="text-base font-black text-text-primary">
+                                    {reasonPrompt.kind === 'doc' ? 'Reject document' : reasonPrompt.status === 'rejected' ? 'Reject application' : 'Request changes'}
+                                </h3>
+                                <p className="mt-1 text-sm text-text-secondary">
+                                    {reasonPrompt.kind === 'doc'
+                                        ? 'Tell the applicant why this document was rejected. This becomes a note on the application, and the applicant sees it on their document.'
+                                        : reasonPrompt.status === 'rejected'
+                                            ? 'Add a reason for rejecting this application. It is recorded as a note and included in the applicant’s email.'
+                                            : 'Explain what the applicant needs to change. It is recorded as a note and included in the applicant’s email.'}
+                                </p>
+                            </div>
+                        </div>
+                        <textarea
+                            autoFocus
+                            rows={4}
+                            value={reasonInput}
+                            onChange={e => setReasonInput(e.target.value)}
+                            placeholder="Enter a clear reason…"
+                            className="ui-input w-full text-sm resize-none"
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                            <button type="button" onClick={() => { setReasonPrompt(null); setReasonInput(""); }} disabled={reasonSubmitting} className="rounded-xl ui-card-soft px-4 py-2.5 text-sm font-bold text-text-secondary hover:text-text-primary disabled:opacity-60">Cancel</button>
+                            <button type="button" onClick={submitReason} disabled={reasonSubmitting || !reasonInput.trim()} className="inline-flex items-center gap-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white px-5 py-2.5 text-sm font-bold disabled:opacity-60">
+                                {reasonSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                                {reasonPrompt.kind === 'doc' ? 'Reject document' : reasonPrompt.status === 'rejected' ? 'Reject application' : 'Send request'}
                             </button>
                         </div>
                     </div>

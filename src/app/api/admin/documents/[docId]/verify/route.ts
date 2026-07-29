@@ -3,8 +3,10 @@ import { getServerSession } from 'next-auth';
 import dbConnect from '@/lib/mongoose';
 import ApplicationDocument from '@/models/ApplicationDocument';
 import JobApplication from '@/models/JobApplication';
+import Staff from '@/models/Staff';
 import type { DocumentType } from '@/models/ApplicationDocument';
 import { getDocumentLabel } from '@/lib/documentMetadata';
+import { linkApplicationDocumentsToStaff } from '@/lib/documentHelpers';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 
 export async function PATCH(
@@ -65,7 +67,10 @@ export async function PATCH(
       }
 
       doc.rejectionReason = null;
-    } else {
+    }
+
+    let updatedNotes: any[] | undefined;
+    if (action === 'reject') {
       doc.status = 'rejected';
       doc.rejectionReason = rejectionReason || 'Rejected by admin';
 
@@ -73,18 +78,32 @@ export async function PATCH(
       const documentLabel = getDocumentLabel(doc.documentType as DocumentType);
       const noteText = `Document "${documentLabel}" was rejected. Reason: ${doc.rejectionReason}.`;
 
-      await JobApplication.findByIdAndUpdate(doc.applicationId, {
-        $push: {
-          notes: {
-            author: reviewerName,
-            text: noteText,
-            createdAt: new Date(),
-          },
-        },
-      });
+      const updatedApp = await JobApplication.findByIdAndUpdate(
+        doc.applicationId,
+        { $push: { notes: { author: reviewerName, text: noteText, createdAt: new Date() } } },
+        { returnDocument: 'after' }
+      ).select('notes').lean();
+      updatedNotes = (updatedApp as any)?.notes;
     }
 
     await doc.save();
+
+    // If this document was verified AFTER the application was already accepted
+    // (e.g. an onboarding-link upload), materialize it into the staff compliance
+    // record now — the accept-time link only ran for docs verified by then.
+    // Idempotent + verified-only, so re-running is safe. Best-effort.
+    if (doc.status === 'verified') {
+      try {
+        const application = await JobApplication.findById(doc.applicationId).select('status applicantEmail').lean();
+        if ((application as any)?.status === 'accepted') {
+          const email = (application as any).applicantEmail as string;
+          const staff = await Staff.findOne({ email: { $regex: new RegExp(`^${email.trim()}$`, 'i') } }).select('staffid').lean();
+          await linkApplicationDocumentsToStaff(String(doc.applicationId), email, (staff as any)?.staffid);
+        }
+      } catch (linkErr: any) {
+        console.error('[Document Verify] post-accept staff materialization failed:', linkErr?.message || linkErr);
+      }
+    }
 
     return NextResponse.json(
       {
@@ -95,6 +114,9 @@ export async function PATCH(
           expiryDate: doc.expiryDate,
           rejectionReason: doc.rejectionReason,
         },
+        // Present on reject: the application's notes now include the rejection
+        // note, so the admin's notes view can update without a refetch.
+        ...(updatedNotes ? { notes: updatedNotes } : {}),
       },
       { status: 200 }
     );

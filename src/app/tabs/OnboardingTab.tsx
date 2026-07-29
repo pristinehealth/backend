@@ -3,9 +3,13 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
     Loader2, Plus, Trash2, X, Search, ClipboardList, UserCheck, Eye, CheckCircle2, Edit, ChevronLeft, ChevronRight, FileText, Download,
-    GripVertical, ChevronUp, ChevronDown, RotateCcw,
+    GripVertical, ChevronUp, ChevronDown, RotateCcw, Send,
 } from "lucide-react";
 import { resolveFieldType, toDateInputValue } from "@/lib/formFields";
+import { RequestOnboardingModal } from "./onboarding/RequestOnboardingModal";
+import { FormsLibraryManager } from "./onboarding/FormsLibraryManager";
+import { CandidateOnboardingDetail } from "./onboarding/CandidateOnboardingDetail";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { downloadOnboardingPdf, toOnboardingPdfData } from "@/lib/pdf/onboarding";
 
 type FieldType = 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file' | 'date';
@@ -33,11 +37,21 @@ interface PacketItem {
     onboardingFormId: string;
     formName: string;
     status: 'in_progress' | 'completed';
+    assignee?: 'admin' | 'applicant';
     answeredCount: number;
     totalCount: number;
     requiredCount: number;
     completedAt: string | null;
     updatedAt: string;
+}
+
+// What the admin requested the applicant to self-serve (if a link was sent).
+interface InviteSummary {
+    status: 'active' | 'completed' | 'revoked' | 'expired';
+    expiresAt: string | null;
+    updatedAt: string;
+    requestedQuestionnaires: string[];
+    requestedDocuments: Array<{ key: string; label: string }>;
 }
 
 interface OnboardingRow {
@@ -52,6 +66,7 @@ interface OnboardingRow {
     onboardingStatus: OnboardingStatus;
     progress: { status: OnboardingStatus; done: number; total: number; answered: number; answerable: number; percent: number };
     onboarding: PacketItem[];
+    invite?: InviteSummary | null;
 }
 
 const DEFAULT_SECTION = 'Onboarding questions';
@@ -75,7 +90,9 @@ const FIELD_TYPE_OPTIONS: { value: FieldType; label: string }[] = [
 ];
 
 export function OnboardingTab() {
-    const [subTab, setSubTab] = useState<'candidates' | 'questionnaires'>('candidates');
+    const [subTab, setSubTab] = useState<'candidates' | 'questionnaires' | 'library'>('candidates');
+    // Candidate the admin is composing an onboarding request for.
+    const [requestRow, setRequestRow] = useState<OnboardingRow | null>(null);
     const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
 
     // ── Questionnaires (builder) ──────────────────────────────────────────
@@ -100,6 +117,8 @@ export function OnboardingTab() {
 
     // ── Candidates list ───────────────────────────────────────────────────
     const [rows, setRows] = useState<OnboardingRow[]>([]);
+    const [confirmRemove, setConfirmRemove] = useState<{ item: PacketItem; row: OnboardingRow } | null>(null);
+    const [detailRow, setDetailRow] = useState<OnboardingRow | null>(null);
     const [loadingRows, setLoadingRows] = useState(true);
     const [statusFilter, setStatusFilter] = useState<'' | OnboardingStatus>('');
     const [jobFilter, setJobFilter] = useState("");
@@ -334,15 +353,11 @@ export function OnboardingTab() {
     };
 
     // Unassigns one questionnaire from a candidate's packet, discarding whatever
-    // answers it holds. The other questionnaires are untouched.
-    const handleRemoveQuestionnaire = async (item: PacketItem, row: OnboardingRow) => {
-        const answered = item.answeredCount > 0;
-        const confirmed = window.confirm(
-            answered
-                ? `Remove "${item.formName}" from ${row.applicantName}'s onboarding? ${item.answeredCount} saved answer${item.answeredCount === 1 ? '' : 's'} will be deleted.`
-                : `Remove "${item.formName}" from ${row.applicantName}'s onboarding?`
-        );
-        if (!confirmed) return;
+    // answers it holds. The other questionnaires are untouched. Confirmed via the
+    // in-app ConfirmDialog (see `confirmRemove` state).
+    const doRemoveQuestionnaire = async () => {
+        if (!confirmRemove) return;
+        const { item } = confirmRemove;
         setRemovingId(item._id);
         try {
             const res = await fetch(`/api/admin/onboarding/${item._id}`, { method: 'DELETE' });
@@ -354,6 +369,7 @@ export function OnboardingTab() {
             await fetchRows();
         } finally {
             setRemovingId(null);
+            setConfirmRemove(null);
         }
     };
 
@@ -505,6 +521,46 @@ export function OnboardingTab() {
         return <input type="text" value={val || ''} onChange={(e) => set(e.target.value)} className="ui-input w-full text-sm" />;
     };
 
+    // Shared file-preview overlay (used by the answer editor and the detail view).
+    const fileViewer = viewerFile ? (() => {
+        const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(viewerFile.name || '');
+        return (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm" onClick={() => setViewerFile(null)}>
+                <div className="w-full max-w-4xl h-[85vh] rounded-2xl border border-border-modal bg-surface-modal shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border-modal">
+                        <div className="flex items-center gap-2 min-w-0"><FileText className="h-4 w-4 text-brand-primary shrink-0" /><p className="text-sm font-bold text-text-primary truncate">{viewerFile.name}</p></div>
+                        <div className="flex items-center gap-1 shrink-0">
+                            <a href={viewerFile.url} download className="p-2 rounded-lg text-text-secondary hover:bg-white/[0.06]" title="Download"><Download className="h-4 w-4" /></a>
+                            <button onClick={() => setViewerFile(null)} className="p-2 rounded-lg text-text-secondary hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
+                        </div>
+                    </div>
+                    <div className="flex-1 bg-slate-100 dark:bg-black/40 overflow-auto flex items-center justify-center">
+                        {isImage ? <img src={viewerFile.url} alt={viewerFile.name} className="max-w-full max-h-full object-contain" /> : <iframe src={viewerFile.url} title={viewerFile.name} className="w-full h-full border-0" />}
+                    </div>
+                </div>
+            </div>
+        );
+    })() : null;
+
+    // Detail view takes over the tab's content area, so the dashboard shell (left
+    // menu) stays visible. The file viewer is still available on top.
+    if (detailRow) {
+        return (
+            <div className="space-y-6">
+                <CandidateOnboardingDetail
+                    applicationId={detailRow._id}
+                    applicantName={detailRow.applicantName}
+                    jobTitle={detailRow.jobTitle}
+                    packet={detailRow.onboarding.map((p) => ({ _id: p._id, formName: p.formName, status: p.status }))}
+                    requestedDocuments={detailRow.invite?.requestedDocuments || []}
+                    onClose={() => setDetailRow(null)}
+                    onViewFile={(url, name) => setViewerFile({ url, name })}
+                />
+                {fileViewer}
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6">
             <div>
@@ -517,6 +573,7 @@ export function OnboardingTab() {
                 {([
                     { id: 'candidates' as const, label: 'Candidates', icon: UserCheck },
                     { id: 'questionnaires' as const, label: 'Questionnaires', icon: ClipboardList },
+                    { id: 'library' as const, label: 'Downloadable Forms', icon: Download },
                 ]).map((t) => {
                     const Icon = t.icon;
                     return (
@@ -609,11 +666,16 @@ export function OnboardingTab() {
                                                 <td className="px-4 py-3 text-text-muted text-xs">{new Date(row.acceptedAt).toLocaleDateString()}</td>
                                                 <td className="px-4 py-3">
                                                     <div className="space-y-1.5 min-w-[150px]">
-                                                        <div className="flex items-center gap-2">
+                                                        <div className="flex items-center gap-2 flex-wrap">
                                                             <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${meta.cls}`}>{meta.label}</span>
                                                             {packet.length > 0 && (
                                                                 <span className="text-[11px] font-bold text-text-muted">
                                                                     {progress.done}/{progress.total} questionnaire{progress.total === 1 ? '' : 's'}
+                                                                </span>
+                                                            )}
+                                                            {row.invite && (row.invite.requestedQuestionnaires.length > 0 || row.invite.requestedDocuments.length > 0) && (
+                                                                <span title={`Applicant link ${row.invite.status}`} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${row.invite.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : row.invite.status === 'revoked' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'ui-card-soft text-text-secondary border-border-card'}`}>
+                                                                    <Send className="h-2.5 w-2.5" /> Link {row.invite.status}
                                                                 </span>
                                                             )}
                                                         </div>
@@ -631,12 +693,30 @@ export function OnboardingTab() {
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3 text-right">
-                                                    <button
-                                                        onClick={() => { setStartRow(row); setPickFormIds([]); }}
-                                                        className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg ${packet.length > 0 ? 'ui-card-soft text-text-secondary hover:text-text-primary' : 'bg-brand-primary text-white hover:bg-brand-primary-dark'}`}
-                                                    >
-                                                        <Plus className="h-3.5 w-3.5" /> {packet.length > 0 ? 'Add questionnaire' : 'Start onboarding'}
-                                                    </button>
+                                                    <div className="inline-flex items-center gap-2">
+                                                        {packet.length > 0 && (
+                                                            <button
+                                                                onClick={() => setDetailRow(row)}
+                                                                title="View submitted answers and documents"
+                                                                className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg ui-card-soft text-text-secondary hover:text-text-primary"
+                                                            >
+                                                                <Eye className="h-3.5 w-3.5" /> View
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            onClick={() => setRequestRow(row)}
+                                                            title="Request the applicant to fill questionnaires / upload documents via a secure link"
+                                                            className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border border-brand-primary/30 text-brand-primary hover:bg-brand-primary/10"
+                                                        >
+                                                            <Send className="h-3.5 w-3.5" /> Request
+                                                        </button>
+                                                        <button
+                                                            onClick={() => { setStartRow(row); setPickFormIds([]); }}
+                                                            className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg ${packet.length > 0 ? 'ui-card-soft text-text-secondary hover:text-text-primary' : 'bg-brand-primary text-white hover:bg-brand-primary-dark'}`}
+                                                        >
+                                                            <Plus className="h-3.5 w-3.5" /> {packet.length > 0 ? 'Add' : 'Start'}
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                             {expanded && packet.map((item) => {
@@ -666,7 +746,7 @@ export function OnboardingTab() {
                                                                 <Edit className="h-3.5 w-3.5" /> Open
                                                             </button>
                                                             <button
-                                                                onClick={() => handleRemoveQuestionnaire(item, row)}
+                                                                onClick={() => setConfirmRemove({ item, row })}
                                                                 disabled={removingId === item._id}
                                                                 title="Remove this questionnaire from the candidate"
                                                                 aria-label={`Remove ${item.formName}`}
@@ -678,6 +758,33 @@ export function OnboardingTab() {
                                                     </tr>
                                                 );
                                             })}
+                                            {expanded && row.invite && (row.invite.requestedQuestionnaires.length > 0 || row.invite.requestedDocuments.length > 0) && (
+                                                <tr className="border-b last:border-0 border-border-card bg-brand-primary-muted/30">
+                                                    <td className="px-4 py-3 pl-12" colSpan={5}>
+                                                        <div className="space-y-1.5">
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <Send className="h-3.5 w-3.5 text-brand-primary" />
+                                                                <span className="text-[11px] font-black uppercase tracking-wider text-brand-primary">Requested from applicant</span>
+                                                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${row.invite.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : row.invite.status === 'revoked' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'ui-card-soft text-text-secondary border-border-card'}`}>
+                                                                    Link {row.invite.status}
+                                                                </span>
+                                                                {row.invite.expiresAt && row.invite.status === 'active' && (
+                                                                    <span className="text-[10px] text-text-muted">expires {new Date(row.invite.expiresAt).toLocaleDateString()}</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {row.invite.requestedQuestionnaires.map((name, i) => (
+                                                                    <span key={`q-${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-primary-muted text-brand-primary border border-brand-primary/15"><ClipboardList className="h-3 w-3" /> {name}</span>
+                                                                ))}
+                                                                {row.invite.requestedDocuments.map((d) => (
+                                                                    <span key={`d-${d.key}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20"><FileText className="h-3 w-3" /> {d.label}</span>
+                                                                ))}
+                                                            </div>
+                                                            <button onClick={() => setRequestRow(row)} className="text-[11px] font-bold text-brand-primary hover:text-brand-primary-dark">Manage request →</button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
                                             </Fragment>
                                         );
                                     })}
@@ -731,6 +838,36 @@ export function OnboardingTab() {
                     )}
                 </div>
             )}
+
+            {/* ── Downloadable Forms library ─────────────────────────────── */}
+            {subTab === 'library' && <FormsLibraryManager />}
+
+            {/* ── Request onboarding modal ───────────────────────────────── */}
+            {requestRow && (
+                <RequestOnboardingModal
+                    applicationId={requestRow._id}
+                    applicantName={requestRow.applicantName}
+                    forms={forms}
+                    onClose={() => setRequestRow(null)}
+                    onChanged={() => void fetchRows()}
+                />
+            )}
+
+            {/* ── Remove-questionnaire confirmation ──────────────────────── */}
+            <ConfirmDialog
+                open={!!confirmRemove}
+                tone="danger"
+                title="Remove questionnaire?"
+                message={confirmRemove
+                    ? confirmRemove.item.answeredCount > 0
+                        ? `Remove "${confirmRemove.item.formName}" from ${confirmRemove.row.applicantName}'s onboarding? ${confirmRemove.item.answeredCount} saved answer${confirmRemove.item.answeredCount === 1 ? '' : 's'} will be deleted.`
+                        : `Remove "${confirmRemove.item.formName}" from ${confirmRemove.row.applicantName}'s onboarding?`
+                    : ''}
+                confirmLabel="Remove"
+                busy={!!confirmRemove && removingId === confirmRemove.item._id}
+                onConfirm={doRemoveQuestionnaire}
+                onClose={() => setConfirmRemove(null)}
+            />
 
             {/* ── Builder modal ──────────────────────────────────────────── */}
             {showFormModal && (
@@ -995,25 +1132,7 @@ export function OnboardingTab() {
             )}
 
             {/* ── File viewer ────────────────────────────────────────────── */}
-            {viewerFile && (() => {
-                const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(viewerFile.name || '');
-                return (
-                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm" onClick={() => setViewerFile(null)}>
-                        <div className="w-full max-w-4xl h-[85vh] rounded-2xl border border-border-modal bg-surface-modal shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border-modal">
-                                <div className="flex items-center gap-2 min-w-0"><FileText className="h-4 w-4 text-brand-primary shrink-0" /><p className="text-sm font-bold text-text-primary truncate">{viewerFile.name}</p></div>
-                                <div className="flex items-center gap-1 shrink-0">
-                                    <a href={viewerFile.url} download className="p-2 rounded-lg text-text-secondary hover:bg-white/[0.06]" title="Download"><Download className="h-4 w-4" /></a>
-                                    <button onClick={() => setViewerFile(null)} className="p-2 rounded-lg text-text-secondary hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
-                                </div>
-                            </div>
-                            <div className="flex-1 bg-slate-100 dark:bg-black/40 overflow-auto flex items-center justify-center">
-                                {isImage ? <img src={viewerFile.url} alt={viewerFile.name} className="max-w-full max-h-full object-contain" /> : <iframe src={viewerFile.url} title={viewerFile.name} className="w-full h-full border-0" />}
-                            </div>
-                        </div>
-                    </div>
-                );
-            })()}
+            {fileViewer}
 
             {/* ── Alert ──────────────────────────────────────────────────── */}
             {alert && (

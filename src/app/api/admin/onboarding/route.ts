@@ -6,7 +6,9 @@ import JobApplication from '@/models/JobApplication';
 import JobPosition from '@/models/JobPosition';
 import OnboardingForm from '@/models/OnboardingForm';
 import OnboardingResponse from '@/models/OnboardingResponse';
+import OnboardingInvite from '@/models/OnboardingInvite';
 import { rollUpOnboarding } from '@/lib/onboardingProgress';
+import { getComplianceRequirements } from '@/lib/compliance';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,14 +53,20 @@ export async function GET(request: Request) {
         // application rather than looked up one-to-one.
         const jobIds = Array.from(new Set(applications.map((a: any) => String(a.jobId)).filter(Boolean)));
         const appIds = applications.map((a: any) => a._id);
-        const [jobs, responses] = await Promise.all([
+        const [jobs, responses, invites, complianceReqs] = await Promise.all([
             JobPosition.find({ _id: { $in: jobIds } }).select('title').lean(),
             OnboardingResponse.find({ applicationId: { $in: appIds } })
-                .select('applicationId onboardingFormId formName order status answeredCount totalCount requiredCount startedByEmail completedAt createdAt updatedAt')
+                .select('applicationId onboardingFormId formName order status assignee answeredCount totalCount requiredCount startedByEmail completedAt createdAt updatedAt')
                 .sort({ order: 1, createdAt: 1 })
                 .lean(),
+            OnboardingInvite.find({ applicationId: { $in: appIds } })
+                .select('applicationId status expiresAt onboardingFormIds requestedDocumentKeys updatedAt')
+                .lean(),
+            getComplianceRequirements(),
         ]);
         const jobTitleById = new Map(jobs.map((j: any) => [String(j._id), j.title]));
+        const reqLabelByKey = new Map((complianceReqs as any[]).map((r) => [r.key, r.label]));
+        const inviteByApp = new Map((invites as any[]).map((iv) => [String(iv.applicationId), iv]));
 
         // Fill in names for records saved before `formName` existed (and for any
         // questionnaire renamed since it was assigned).
@@ -78,6 +86,20 @@ export async function GET(request: Request) {
         let rows = applications.map((app: any) => {
             const packet = responsesByAppId.get(String(app._id)) || [];
             const progress = rollUpOnboarding(packet);
+            const iv = inviteByApp.get(String(app._id));
+            // What the admin explicitly requested the applicant to self-serve.
+            const invite = iv ? {
+                status: iv.status,
+                expiresAt: iv.expiresAt || null,
+                updatedAt: iv.updatedAt,
+                requestedQuestionnaires: packet
+                    .filter((r: any) => r.assignee === 'applicant')
+                    .map((r: any) => formNameById.get(String(r.onboardingFormId)) || r.formName || 'Questionnaire'),
+                requestedDocuments: (iv.requestedDocumentKeys || []).map((k: string) => ({
+                    key: k,
+                    label: reqLabelByKey.get(k) || k,
+                })),
+            } : null;
             return {
                 _id: app._id,
                 applicantName: app.applicantName,
@@ -90,12 +112,14 @@ export async function GET(request: Request) {
                     onboardingFormId: r.onboardingFormId,
                     formName: formNameById.get(String(r.onboardingFormId)) || r.formName || 'Questionnaire',
                     status: r.status,
+                    assignee: r.assignee || 'admin',
                     answeredCount: r.answeredCount || 0,
                     totalCount: r.totalCount || 0,
                     requiredCount: r.requiredCount || 0,
                     completedAt: r.completedAt || null,
                     updatedAt: r.updatedAt,
                 })),
+                invite,
                 progress,
                 onboardingStatus: progress.status,
             };
