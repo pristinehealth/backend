@@ -14,6 +14,11 @@ export interface OnboardingResponseDocument extends mongoose.Document {
     jobId?: mongoose.Types.ObjectId | null;
     applicantName: string;
     applicantEmail: string;
+    // Who is expected to fill this questionnaire. 'admin' = the recruiter fills it
+    // internally (the original behavior); 'applicant' = the accepted candidate
+    // fills it themselves via an expiring onboarding link. Default 'admin' so
+    // every existing record keeps its current behavior.
+    assignee: 'admin' | 'applicant';
     // Snapshot of the questionnaire name so candidate lists can render the packet
     // without an extra lookup per row. The questionnaire remains the source of
     // truth; this is refreshed whenever the record is read via its own endpoint.
@@ -58,6 +63,11 @@ const OnboardingResponseSchema = new mongoose.Schema<OnboardingResponseDocument>
         },
         applicantName: { type: String, default: '' },
         applicantEmail: { type: String, default: '' },
+        assignee: {
+            type: String,
+            enum: ['admin', 'applicant'],
+            default: 'admin',
+        },
         formName: { type: String, default: '' },
         order: { type: Number, default: 0 },
         answers: {
@@ -98,6 +108,13 @@ OnboardingResponseSchema.index({ applicationId: 1, order: 1 });
 // application) still exists on deployed databases and will reject the second
 // questionnaire with E11000 — Mongoose never drops indexes it no longer declares.
 // Run migrations/010-onboarding-multi-questionnaire.js to drop it.
+
+// Drop a stale cached model that predates the `assignee` path so the schema
+// recompiles instead of silently stripping it (mirrors OnboardingForm's guard).
+const cachedResponse = mongoose.models.OnboardingResponse as mongoose.Model<OnboardingResponseDocument> | undefined;
+if (cachedResponse && !cachedResponse.schema.path('assignee')) {
+    delete (mongoose.models as Record<string, unknown>).OnboardingResponse;
+}
 
 export default (mongoose.models.OnboardingResponse as mongoose.Model<OnboardingResponseDocument>) ||
     mongoose.model<OnboardingResponseDocument>('OnboardingResponse', OnboardingResponseSchema);

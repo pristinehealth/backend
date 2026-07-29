@@ -5,47 +5,13 @@ import dbConnect from '@/lib/mongoose';
 import OnboardingForm from '@/models/OnboardingForm';
 import OnboardingResponse from '@/models/OnboardingResponse';
 import JobPosition from '@/models/JobPosition';
-import { resolveFileReference } from '@/lib/uploadResolve';
+import { validateAnswers } from '@/lib/onboardingAnswers';
 
 async function isAdmin() {
     const session = await getServerSession(authOptions);
     if (!session || !session.user) return false;
     const role = (session.user as any).role;
     return role === 'admin' || role === 'superadmin';
-}
-
-// Validate submitted answers against the questionnaire's field definitions.
-// Mirrors the per-type loop in src/app/api/jobs/[id]/apply/route.ts. `requireAll`
-// is only enforced when marking complete — a mid-onboarding save may be partial.
-async function validateAnswers(
-    fields: any[],
-    input: Record<string, any>,
-    requireAll: boolean
-): Promise<{ error?: string; values?: Record<string, any> }> {
-    const values: Record<string, any> = {};
-    for (const field of fields) {
-        const val = input[field.name];
-        const isEmpty = val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0);
-
-        if (requireAll && field.required && isEmpty) {
-            return { error: `"${field.label}" is required` };
-        }
-        if (isEmpty) continue;
-
-        if (field.type === 'number') {
-            const num = Number(val);
-            if (Number.isNaN(num)) return { error: `"${field.label}" must be a number` };
-            values[field.name] = num;
-        } else if (field.type === 'checkbox') {
-            if (!Array.isArray(val)) return { error: `"${field.label}" must be a list of selected options` };
-            values[field.name] = val;
-        } else if (field.type === 'file') {
-            values[field.name] = await resolveFileReference(val);
-        } else {
-            values[field.name] = val;
-        }
-    }
-    return { values };
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

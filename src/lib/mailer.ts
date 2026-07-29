@@ -318,20 +318,52 @@ export async function sendApplicationStatusChangeEmail(
     name: string,
     jobTitle: string,
     status: ApplicationStatus,
-    trackingUrl?: string
+    trackingUrl?: string,
+    reason?: string
 ) {
     const apiKey = process.env.RESEND_API_KEY;
     const statusLabel = statusLabelMap[status] || status;
+    const reasonText = (reason || '').trim();
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Label the reason by what it is: changes requested vs a rejection.
+    const reasonHeading = status === 'changes_requested' ? 'What we need you to update' : 'Reason';
 
     if (!apiKey) {
         console.log(`\n========================================`);
         console.log(`[DEV] Application Status Update for ${to}`);
         console.log(`JOB: ${jobTitle}`);
         console.log(`STATUS: ${statusLabel}`);
+        if (reasonText) console.log(`${reasonHeading.toUpperCase()}: ${reasonText}`);
+        if (status === 'changes_requested') console.log(`HOW TO UPDATE:\n1. Open your application via the link below.\n2. Expand the section that needs changes and edit; click "Update" to replace a document.\n3. Click "Save updates" to submit — the application moves back to pending review.`);
         if (trackingUrl) console.log(`ACCESS LINK: ${trackingUrl}`);
         console.log(`========================================\n`);
         return;
     }
+
+    const reasonHtml = reasonText
+        ? `<div style="background-color: #FFF7ED; border: 1px solid #FED7AA; border-radius: 8px; padding: 14px; margin: 18px 0;">
+                <p style="margin: 0; color: #9A3412; font-size: 12px; font-weight: 700;">${reasonHeading}</p>
+                <p style="margin: 6px 0 0 0; color: #7C2D12; font-size: 14px; white-space: pre-wrap;">${esc(reasonText)}</p>
+            </div>`
+        : '';
+    const reasonPlain = reasonText ? `\n\n${reasonHeading}:\n${reasonText}` : '';
+
+    // When we ask for changes, spell out exactly how to update and re-submit so
+    // the applicant isn't left guessing where to edit or how their changes save.
+    const isChangesRequested = status === 'changes_requested';
+    const howToHtml = isChangesRequested
+        ? `<div style="background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 8px; padding: 14px; margin: 18px 0;">
+                <p style="margin: 0 0 8px 0; color: #1E40AF; font-size: 12px; font-weight: 700;">How to update your application</p>
+                <ol style="margin: 0; padding-left: 18px; color: #1E3A8A; font-size: 14px; line-height: 1.6;">
+                    <li>Open your application using the button below.</li>
+                    <li>Expand the section that needs changes and edit your answers. To replace a document, click <strong>Update</strong> next to the file and upload a new one.</li>
+                    <li>Click <strong>Save updates</strong> at the bottom to submit. Your application then moves back to pending review automatically.</li>
+                </ol>
+            </div>`
+        : '';
+    const howToPlain = isChangesRequested
+        ? `\n\nHow to update your application:\n1. Open your application using the secure link below.\n2. Expand the section that needs changes and edit your answers. To replace a document, click "Update" next to the file and upload a new one.\n3. Click "Save updates" at the bottom to submit. Your application then moves back to pending review automatically.`
+        : '';
 
     // One-click access link (valid 7 days) so applicants can open their
     // application straight from the email without requesting a new code.
@@ -350,7 +382,7 @@ export async function sendApplicationStatusChangeEmail(
         from: `Pristine Staffing <${FROM}>`,
         to,
         subject: `Application Update: ${jobTitle} (${statusLabel})`,
-        text: `Hello ${name},\n\nYour application for ${jobTitle} has been updated to: ${statusLabel}.${ctaText}\n\nBest regards,\nPristine Staffing Team`,
+        text: `Hello ${name},\n\nYour application for ${jobTitle} has been updated to: ${statusLabel}.${reasonPlain}${howToPlain}${ctaText}\n\nBest regards,\nPristine Staffing Team`,
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
                 <h2 style="color: #3B6BB5;">Pristine Application Update</h2>
@@ -360,6 +392,8 @@ export async function sendApplicationStatusChangeEmail(
                     <p style="margin: 0; color: #4B5563; font-size: 12px;">Current Status</p>
                     <p style="margin: 6px 0 0 0; color: #111827; font-weight: 700; font-size: 20px;">${statusLabel}</p>
                 </div>
+                ${reasonHtml}
+                ${howToHtml}
                 ${ctaHtml}
             </div>
         `,
@@ -371,6 +405,57 @@ export async function sendApplicationStatusChangeEmail(
     }
 
     console.log(`[Mailer] Application status email sent to ${to}`);
+}
+
+/**
+ * Invite an accepted applicant to complete onboarding — fill assigned
+ * questionnaires and/or upload requested compliance documents — via a secure,
+ * expiring one-click link. `expiresAt` drives the "expires in N days" copy.
+ * Falls back to a console log in dev when no RESEND_API_KEY is configured.
+ */
+export async function sendOnboardingInviteEmail(
+    to: string,
+    name: string,
+    onboardingUrl: string,
+    expiresAt: Date
+) {
+    const apiKey = process.env.RESEND_API_KEY;
+    const msLeft = expiresAt.getTime() - Date.now();
+    const daysLeft = Math.max(1, Math.ceil(msLeft / (24 * 60 * 60 * 1000)));
+
+    if (!apiKey) {
+        console.log(`\n========================================`);
+        console.log(`[DEV] Onboarding Invite for ${to}`);
+        console.log(`LINK: ${onboardingUrl}`);
+        console.log(`EXPIRES: ${expiresAt.toISOString()} (~${daysLeft} day(s))`);
+        console.log(`========================================\n`);
+        return;
+    }
+
+    const { error } = await resend.emails.send({
+        from: `Pristine Careers <${FROM}>`,
+        to,
+        subject: 'Complete your onboarding with Pristine',
+        text: `Hello ${name},\n\nCongratulations and welcome! To continue onboarding, please complete the items we've requested — this may include a few questionnaires and uploading required documents.\n\nGet started (secure link, expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}):\n${onboardingUrl}\n\nIf the link expires, contact us and we'll send a new one.\n\nBest regards,\nPristine Staffing Team`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                <h2 style="color: #3B6BB5;">Complete Your Onboarding</h2>
+                <p>Hello ${name},</p>
+                <p>Congratulations and welcome! To continue your onboarding, please complete the items we've requested — this may include a few questionnaires and uploading required documents.</p>
+                <div style="margin: 22px 0;">
+                    <a href="${onboardingUrl}" style="display: inline-block; background-color: #3B6BB5; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 12px 22px; border-radius: 8px;">Start onboarding</a>
+                </div>
+                <p style="color: #666; font-size: 12px;">This secure link is unique to you and expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. If it expires, contact us and we'll send a new one.</p>
+            </div>
+        `,
+    });
+
+    if (error) {
+        console.error(`[Mailer] Resend error sending onboarding invite to ${to}:`, error);
+        throw new Error(`Failed to send email: ${error.message}`);
+    }
+
+    console.log(`[Mailer] Onboarding invite sent to ${to}`);
 }
 
 export async function sendApplicationNoteNotificationEmail(

@@ -40,7 +40,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         const { id } = await params;
         const body = await request.json();
         const status = typeof body?.status === 'string' ? body.status : '';
-        console.log('[Admin Application Status] Input received', { id, status, bodyKeys: Object.keys(body || {}) });
+        const note = typeof body?.note === 'string' ? body.note.trim() : '';
+        console.log('[Admin Application Status] Input received', { id, status, hasNote: !!note });
 
         const allowedStatuses = ['pending', 'reviewed', 'shortlisted', 'rejected', 'accepted', 'changes_requested'];
         if (!status || !allowedStatuses.includes(status)) {
@@ -48,9 +49,24 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             return NextResponse.json({ error: `Invalid status. Must be one of: ${allowedStatuses.join(', ')}` }, { status: 400 });
         }
 
+        // Requesting changes or rejecting must carry a reason — it becomes the
+        // note the applicant sees and the reason in their email.
+        if ((status === 'changes_requested' || status === 'rejected') && !note) {
+            return NextResponse.json({ error: 'A reason is required when requesting changes or rejecting.' }, { status: 400 });
+        }
+
+        // Author for the note comes from the reviewer's session.
+        const session = await getServerSession(authOptions);
+        const reviewerName = (session?.user as any)?.name || session?.user?.email || 'Reviewer';
+
+        const update: any = { $set: { status } };
+        if (note) {
+            update.$push = { notes: { author: reviewerName, text: note, createdAt: new Date() } };
+        }
+
         const application = await JobApplication.findByIdAndUpdate(
             id,
-            { $set: { status } },
+            update,
             { returnDocument: 'after', runValidators: true }
         );
 
@@ -79,7 +95,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
                     application.applicantName,
                     job?.title || 'Job Position',
                     status,
-                    buildTrackingUrl(String(application._id), application.applicantEmail)
+                    buildTrackingUrl(String(application._id), application.applicantEmail),
+                    note
                 );
                 console.log('[Admin Application Status] Notification sent', {
                     id,
