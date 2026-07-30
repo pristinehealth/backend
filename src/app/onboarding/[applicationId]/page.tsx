@@ -196,7 +196,7 @@ export default function OnboardingPage() {
     if (loading) {
         return (
             <div className="min-h-screen bg-background text-foreground flex flex-col">
-                <PublicHeader label="Onboarding" />
+                <PublicHeader label="Onboarding" showLogin={false} />
                 <div className="flex-1 flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-brand-primary" /></div>
             </div>
         );
@@ -206,7 +206,7 @@ export default function OnboardingPage() {
             : payload.reason === 'expired' ? 'This onboarding link has expired.' : 'This onboarding link is not valid.';
         return (
             <div className="min-h-screen bg-background text-foreground flex flex-col">
-                <PublicHeader label="Onboarding" />
+                <PublicHeader label="Onboarding" showLogin={false} />
                 <div className="flex-1 flex items-center justify-center p-6">
                     <div className="max-w-md w-full bg-surface-card border border-border-card rounded-3xl p-8 text-center space-y-3 shadow-xl">
                         <div className="mx-auto h-14 w-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center"><Lock className="h-7 w-7 text-amber-500" /></div>
@@ -221,7 +221,7 @@ export default function OnboardingPage() {
     if (submitted) {
         return (
             <div className="min-h-screen bg-background text-foreground flex flex-col">
-                <PublicHeader label="Onboarding" />
+                <PublicHeader label="Onboarding" showLogin={false} />
                 <div className="flex-1 flex items-center justify-center p-6">
                     <div className="max-w-md w-full bg-surface-card border border-border-card rounded-3xl p-8 text-center space-y-4 shadow-xl">
                         <div className="mx-auto h-16 w-16 rounded-2xl bg-gradient-to-br from-emerald-400/20 to-emerald-600/10 border border-emerald-500/20 flex items-center justify-center"><PartyPopper className="h-8 w-8 text-emerald-500" /></div>
@@ -241,7 +241,7 @@ export default function OnboardingPage() {
 
     return (
         <div className="min-h-screen bg-background text-foreground pb-16">
-            <PublicHeader label="Onboarding" />
+            <PublicHeader label="Onboarding" showLogin={false} />
             {/* Branded hero — the team photo with a dark overlay for legibility,
                 finished with a thin brand accent line. */}
             <div className="relative overflow-hidden">

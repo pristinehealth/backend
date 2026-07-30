@@ -6,7 +6,10 @@ import { Sun, Moon } from "lucide-react";
 
 // Shared top navigation for applicant-facing pages (Careers, Track, Onboarding).
 // Mirrors the header on /jobs so the whole public portal feels like one platform.
-export function PublicHeader({ label = "Careers" }: { label?: string }) {
+// `showLogin` hides the staff "Employee Login" CTA on pages an applicant reaches
+// via their own secure link (Track, Onboarding) — they're already authenticated
+// by the link and aren't staff, so prompting a login is misleading.
+export function PublicHeader({ label = "Careers", showLogin = true }: { label?: string; showLogin?: boolean }) {
     const [theme, setTheme] = useState<'light' | 'dark'>('dark');
 
     useEffect(() => {
@@ -35,9 +38,11 @@ export function PublicHeader({ label = "Careers" }: { label?: string }) {
                     >
                         {theme === 'dark' ? <Sun className="h-4.5 w-4.5 text-amber-500" /> : <Moon className="h-4.5 w-4.5 text-indigo-500" />}
                     </button>
-                    <Link href="/login?callbackUrl=/dashboard" className="text-xs font-bold ui-subtle-action transition-colors px-4 py-2 rounded-xl">
-                        Employee Login
-                    </Link>
+                    {showLogin && (
+                        <Link href="/login?callbackUrl=/dashboard" className="text-xs font-bold ui-subtle-action transition-colors px-4 py-2 rounded-xl">
+                            Employee Login
+                        </Link>
+                    )}
                 </div>
             </div>
         </header>
