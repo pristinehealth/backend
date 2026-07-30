@@ -491,7 +491,7 @@ export default function TrackApplicationDetailsPage({ params }: { params: Promis
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <PublicHeader label="Application" />
+      <PublicHeader label="Application" showLogin={false} />
 
       {/* Branded hero */}
       <div className="relative overflow-hidden">
