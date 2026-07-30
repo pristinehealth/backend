@@ -31,6 +31,8 @@ export default withAuth(
                     pathname.startsWith("/api/auth") ||         // Incl. forgot-password + reset-password APIs
                     pathname.startsWith("/api/jobs") ||         // Public jobs API
                     pathname.startsWith("/api/applications") || // Candidates applying
+                    pathname.startsWith("/onboarding") ||       // Applicant self-service onboarding page (secure link)
+                    pathname.startsWith("/api/onboarding") ||   // Applicant onboarding APIs (token-verified; admin ones are under /api/admin/onboarding)
                     pathname === "/api/contact" ||              // Public contact form (NOT /api/contacts, which is admin)
                     pathname.startsWith("/api/contact/") ||
                     pathname.startsWith("/api/upload") ||       // Public file uploads (applicants)
