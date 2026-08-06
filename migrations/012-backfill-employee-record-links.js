@@ -70,6 +70,11 @@ async function buildIndex(models) {
     return null;
   };
 
+  // Best-known applicant email for a row: its own, else its application's.
+  // Empty for a document whose application was deleted (nothing to look up).
+  const emailFor = ({ applicationId, applicantEmail }) =>
+    norm(applicantEmail) || (applicationId ? appEmail.get(String(applicationId)) : '') || '';
+
   // Explain WHY a row didn't resolve, so orphans (a deleted application) are
   // distinguishable from a real gap (a missing record → run 011) or a bug.
   const diagnose = ({ applicationId, applicantEmail }) => {
@@ -80,7 +85,7 @@ async function buildIndex(models) {
     return 'unexpected — should have resolved (possible resolver bug)';
   };
 
-  return { resolve, diagnose, recordCount: records.length };
+  return { resolve, diagnose, emailFor, recordCount: records.length };
 }
 
 // Cap on how many unresolved rows we print per collection (avoids flooding a
@@ -88,7 +93,7 @@ async function buildIndex(models) {
 const UNRESOLVED_LOG_CAP = 50;
 
 async function backfillCollection(Model, label, fields, index, dryRun) {
-  const { resolve, diagnose } = index;
+  const { resolve, diagnose, emailFor } = index;
   const rows = await Model.find({
     $or: [{ employeeRecordId: null }, { employeeRecordId: { $exists: false } }],
   }).select(fields).lean();
@@ -111,11 +116,11 @@ async function backfillCollection(Model, label, fields, index, dryRun) {
   // Per-row detail on what couldn't be resolved + a reason, so a prod run is
   // self-explanatory (deleted-application orphans vs. a real gap).
   unresolvedRows.slice(0, UNRESOLVED_LOG_CAP).forEach((row) => {
-    const bits = [`_id=${row._id}`, `appId=${row.applicationId ?? '—'}`];
+    const ref = { applicationId: row.applicationId, applicantEmail: row.applicantEmail };
+    const bits = [`_id=${row._id}`, `appId=${row.applicationId ?? '—'}`, `email=${emailFor(ref) || '—'}`];
     if (row.documentType) bits.push(`type=${row.documentType}`);
     if (row.status) bits.push(`status=${row.status}`);
-    if (row.applicantEmail) bits.push(`email=${row.applicantEmail}`);
-    bits.push(`→ ${diagnose({ applicationId: row.applicationId, applicantEmail: row.applicantEmail })}`);
+    bits.push(`→ ${diagnose(ref)}`);
     console.log(`        · ${bits.join('  ')}`);
   });
   if (unresolved > UNRESOLVED_LOG_CAP) {
