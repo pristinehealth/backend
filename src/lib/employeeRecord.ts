@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import EmployeeRecord from '@/models/EmployeeRecord';
+import EmployeeRecord, { type EmployeeRecordDocument } from '@/models/EmployeeRecord';
 
 // Helpers for the person-centric EmployeeRecord hub. Phase 1 uses only the
 // email resolver below to dual-write `employeeRecordId` onto applications,
@@ -55,4 +55,57 @@ export async function resolveEmployeeRecordIdByEmail(
         console.error('[employeeRecord] resolve failed for', norm, err?.message || err);
         return null;
     }
+}
+
+/**
+ * Find-or-create the EmployeeRecord for a STAFF member (Phase 3 — onboarding a
+ * staff member who never applied). Keyed by staffId; if a record already exists
+ * for the given email with no staffId, it is linked (exact-email match only,
+ * per the email-primary/manual-merge policy). Returns the saved record.
+ *
+ * Throws only on a genuine save failure; the caller surfaces that to the admin.
+ */
+export async function resolveEmployeeRecordByStaff(
+    staffId: string,
+    opts: { email?: string | null; name?: string } = {}
+): Promise<EmployeeRecordDocument | null> {
+    const sid = String(staffId || '').trim();
+    if (!sid) return null;
+    const email = normalizeEmail(opts.email);
+
+    let rec = await EmployeeRecord.findOne({ staffId: sid });
+
+    // Link an existing email-keyed record only on exact email match AND only if it
+    // isn't already claimed by a different staffId (never auto-merge across staff).
+    if (!rec && email) {
+        const byEmail = await EmployeeRecord.findOne({ email });
+        if (byEmail && !byEmail.staffId) {
+            byEmail.staffId = sid;
+            rec = byEmail;
+        }
+    }
+
+    if (!rec) {
+        // Drop the email if it's already taken by a different record to keep the
+        // unique index clean (that person then needs a manual merge).
+        let emailForNew: string | null = email || null;
+        if (emailForNew && (await EmployeeRecord.exists({ email: emailForNew }))) emailForNew = null;
+        rec = new EmployeeRecord({
+            staffId: sid,
+            email: emailForNew,
+            name: opts.name || '',
+            status: 'staff',
+            primaryEmailSource: emailForNew ? 'staff' : null,
+        });
+    }
+
+    if (email && !rec.email) {
+        rec.email = email;
+        rec.primaryEmailSource = rec.primaryEmailSource || 'manual';
+    }
+    if (opts.name && !rec.name) rec.name = opts.name;
+    if (rec.status !== 'staff') rec.status = 'staff';
+
+    await rec.save();
+    return rec;
 }

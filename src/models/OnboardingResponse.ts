@@ -9,7 +9,7 @@ import type { AdminNote } from './JobApplication';
 // the absence of any record; each record is 'in_progress' until an admin marks
 // it 'completed'.
 export interface OnboardingResponseDocument extends mongoose.Document {
-    applicationId: mongoose.Types.ObjectId;
+    applicationId?: mongoose.Types.ObjectId | null;
     // Person-centric owner (EmployeeRecord). Phase 1: dual-written + backfilled by
     // migration 012; not yet read. Phase 2 keys reads on this instead.
     employeeRecordId?: mongoose.Types.ObjectId | null;
@@ -47,12 +47,13 @@ export interface OnboardingResponseDocument extends mongoose.Document {
 
 const OnboardingResponseSchema = new mongoose.Schema<OnboardingResponseDocument>(
     {
+        // Optional (Phase 3): a questionnaire assigned to a staff member with no
+        // application has none. Uniqueness now keys on (employeeRecordId,
+        // onboardingFormId) below instead of the application.
         applicationId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'JobApplication',
-            required: true,
-            // NOT unique — a candidate holds one record per assigned
-            // questionnaire. Uniqueness is enforced on the pair below.
+            default: null,
         },
         employeeRecordId: {
             type: mongoose.Schema.Types.ObjectId,
@@ -105,13 +106,17 @@ const OnboardingResponseSchema = new mongoose.Schema<OnboardingResponseDocument>
     { timestamps: true }
 );
 
-// A candidate may hold many questionnaires, but never the same one twice.
+// A person holds many questionnaires, but never the same one twice. Keyed on the
+// person (employeeRecordId) so a staff record with no application is covered;
+// partial so any not-yet-backfilled null doesn't collide. Replaces the old
+// (applicationId, onboardingFormId) unique, which migration 013 drops.
 OnboardingResponseSchema.index(
-    { applicationId: 1, onboardingFormId: 1 },
-    { unique: true, name: 'applicationId_onboardingFormId_unique' }
+    { employeeRecordId: 1, onboardingFormId: 1 },
+    { unique: true, name: 'employeeRecordId_onboardingFormId_unique', partialFilterExpression: { employeeRecordId: { $type: 'objectId' } } }
 );
-// Packet lookups for a candidate list page.
+// Packet lookups for a candidate list page (applicant flow still queries by app).
 OnboardingResponseSchema.index({ applicationId: 1, order: 1 });
+OnboardingResponseSchema.index({ employeeRecordId: 1, order: 1 });
 
 // The legacy `applicationId_1` UNIQUE index (from when there was one record per
 // application) still exists on deployed databases and will reject the second
