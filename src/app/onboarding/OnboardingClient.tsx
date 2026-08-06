@@ -270,18 +270,19 @@ export default function OnboardingClient({ trackApiBase }: { trackApiBase: strin
                 <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-6 lg:gap-8">
                     {/* Step rail */}
                     <div className="lg:sticky lg:top-6 self-start">
-                        <div className="bg-surface-card border border-border-card rounded-2xl p-4 shadow-lg">
-                            <ol className="space-y-1.5">
+                        <div className="bg-surface-card border border-border-card rounded-2xl p-3 sm:p-4 shadow-lg">
+                            {/* Horizontal scrollable chips on mobile, vertical rail on desktop */}
+                            <ol className="flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 -mx-1 px-1 lg:mx-0 lg:px-0">
                                 {steps.map((s, i) => {
                                     const done = s.kind !== 'review' && stepComplete(s);
                                     const isCurrent = i === safeStep;
                                     const Icon = s.kind === 'questionnaire' ? ClipboardList : s.kind === 'documents' ? ShieldCheck : CheckCircle2;
                                     return (
-                                        <li key={i}>
+                                        <li key={i} className="shrink-0 lg:shrink">
                                             <button onClick={() => setStepIndex(i)}
-                                                className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-left text-xs font-bold transition-colors ${isCurrent ? 'bg-brand-primary text-white shadow-sm shadow-brand-primary/20' : done ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/5' : 'text-text-secondary hover:bg-white/[0.03]'}`}>
+                                                className={`shrink-0 lg:w-full whitespace-nowrap flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-left text-xs font-bold transition-colors ${isCurrent ? 'bg-brand-primary text-white shadow-sm shadow-brand-primary/20' : done ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/5' : 'text-text-secondary hover:bg-white/[0.03]'}`}>
                                                 {done && !isCurrent ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <Icon className="h-4 w-4 shrink-0" />}
-                                                <span className="truncate">{s.label}</span>
+                                                <span className="lg:truncate">{s.label}</span>
                                             </button>
                                         </li>
                                     );
@@ -325,25 +326,25 @@ export default function OnboardingClient({ trackApiBase }: { trackApiBase: strin
                             )}
                         </div>
 
-                        {/* Footer nav */}
-                        <div className="flex items-center justify-between gap-3 pt-1">
+                        {/* Footer nav — stacks on mobile (actions on top, Back below) */}
+                        <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
                             <button onClick={() => setStepIndex(Math.max(0, safeStep - 1))} disabled={safeStep === 0}
-                                className="px-4 py-2.5 rounded-xl text-xs font-bold ui-card-soft text-text-secondary disabled:opacity-40 inline-flex items-center gap-1.5">
+                                className="w-full sm:w-auto justify-center px-4 py-2.5 rounded-xl text-xs font-bold ui-card-soft text-text-secondary disabled:opacity-40 inline-flex items-center gap-1.5">
                                 <ArrowLeft className="h-4 w-4" /> Back
                             </button>
-                            <div className="flex items-center gap-2.5">
+                            <div className="flex items-center gap-2.5 w-full sm:w-auto">
                                 <button onClick={() => persist(false)} disabled={saving !== null}
-                                    className="px-4 py-2.5 rounded-xl text-xs font-bold ui-card-soft text-text-secondary disabled:opacity-60 inline-flex items-center gap-1.5">
+                                    className="flex-1 sm:flex-none justify-center px-4 py-2.5 rounded-xl text-xs font-bold ui-card-soft text-text-secondary disabled:opacity-60 inline-flex items-center gap-1.5">
                                     {saving === 'save' ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Save progress
                                 </button>
                                 {current?.kind === 'review' ? (
                                     <button onClick={() => persist(true)} disabled={saving !== null}
-                                        className="px-6 py-2.5 rounded-xl text-xs font-bold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 inline-flex items-center gap-1.5">
+                                        className="flex-1 sm:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-bold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-60 inline-flex items-center gap-1.5">
                                         {saving === 'submit' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Submit onboarding
                                     </button>
                                 ) : (
                                     <button onClick={() => setStepIndex(Math.min(steps.length - 1, safeStep + 1))}
-                                        className="px-6 py-2.5 rounded-xl text-xs font-bold bg-brand-primary text-white hover:bg-brand-primary-dark inline-flex items-center gap-1.5">
+                                        className="flex-1 sm:flex-none justify-center px-6 py-2.5 rounded-xl text-xs font-bold bg-brand-primary text-white hover:bg-brand-primary-dark inline-flex items-center gap-1.5">
                                         Next <ArrowLeft className="h-4 w-4 rotate-180" />
                                     </button>
                                 )}

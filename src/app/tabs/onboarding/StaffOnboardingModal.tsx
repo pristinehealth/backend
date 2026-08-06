@@ -39,6 +39,7 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
     const [busyAction, setBusyAction] = useState<'revoke' | 'regenerate' | 'cancel' | null>(null);
     const [confirmCancel, setConfirmCancel] = useState(false);
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
     const [copied, setCopied] = useState(false);
 
     useEffect(() => {
@@ -74,7 +75,7 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
     const pick = async (s: StaffOption) => {
         setSelected(s);
         setEmail(s.email || '');
-        setLink(''); setError('');
+        setLink(''); setError(''); setSuccess('');
         setInvite(null); setEmployeeRecordId(''); setFormIds([]); setDocKeys([]);
         // Load any existing invite for this staff member so the admin can manage it.
         try {
@@ -99,7 +100,7 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
         if (!selected) { setError('Select a staff member first.'); return; }
         if (!email.trim()) { setError('An email is required to send the onboarding link.'); return; }
         if (formIds.length === 0 && docKeys.length === 0) { setError('Select at least one questionnaire or document.'); return; }
-        setBusy(true); setError('');
+        setBusy(true); setError(''); setSuccess('');
         try {
             const res = await fetch('/api/admin/onboarding/staff-invite', {
                 method: 'POST',
@@ -111,6 +112,7 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
             setLink(data.onboardingUrl || '');
             if (data.employeeRecordId) setEmployeeRecordId(data.employeeRecordId);
             if (data.invite) setInvite(data.invite);
+            setSuccess(`Onboarding link generated for ${staffLabel(selected)} — emailed to ${email.trim()}.`);
             onChanged?.();
         } finally {
             setBusy(false);
@@ -119,7 +121,7 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
 
     const act = async (action: 'revoke' | 'regenerate' | 'cancel') => {
         if (!employeeRecordId) return;
-        setBusyAction(action); setError('');
+        setBusyAction(action); setError(''); setSuccess('');
         try {
             const res = await fetch(`/api/admin/onboarding/staff-invite/${employeeRecordId}`, {
                 method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
@@ -130,6 +132,7 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
             if (data.onboardingUrl) setLink(data.onboardingUrl);
             if (action === 'revoke' || action === 'cancel') setLink('');
             if (action === 'cancel') { setFormIds([]); setDocKeys([]); setConfirmCancel(false); }
+            setSuccess(action === 'revoke' ? 'Onboarding link revoked.' : action === 'regenerate' ? 'Link regenerated and re-emailed.' : 'Onboarding request cancelled.');
             onChanged?.();
         } finally {
             setBusyAction(null);
@@ -238,12 +241,17 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
                                 </div>
                             )}
 
+                            {success && (
+                                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-500 inline-flex items-center gap-1.5">
+                                    <Check className="h-3.5 w-3.5" /> {success}
+                                </div>
+                            )}
                             {error && <p className="text-xs text-rose-500">{error}</p>}
                         </>
                     )}
                 </div>
 
-                <div className="shrink-0 flex items-center justify-between gap-2 px-6 py-4 border-t border-border-modal bg-surface-modal">
+                <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-6 py-4 border-t border-border-modal bg-surface-modal">
                     <div className="flex gap-2">
                         {invite && invite.status === 'active' && hasRequest && employeeRecordId && (
                             <button onClick={() => act('revoke')} disabled={busyAction !== null} title="Disable the link but keep what was requested" className="px-3 py-2 rounded-xl text-xs font-bold border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 disabled:opacity-60 inline-flex items-center gap-1.5">
