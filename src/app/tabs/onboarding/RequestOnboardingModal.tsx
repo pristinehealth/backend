@@ -28,6 +28,7 @@ export function RequestOnboardingModal({ applicationId, applicantName, forms, on
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState<'send' | 'revoke' | 'regenerate' | 'cancel' | null>(null);
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
     const [copied, setCopied] = useState(false);
     const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
 
@@ -61,7 +62,7 @@ export function RequestOnboardingModal({ applicationId, applicantName, forms, on
 
     const send = async () => {
         if (formIds.length === 0 && docKeys.length === 0) { setError('Select at least one questionnaire or document.'); return; }
-        setBusy('send'); setError('');
+        setBusy('send'); setError(''); setSuccess('');
         try {
             const res = await fetch('/api/admin/onboarding/invite', {
                 method: 'POST',
@@ -72,6 +73,7 @@ export function RequestOnboardingModal({ applicationId, applicantName, forms, on
             if (!res.ok) { setError(data?.error || 'Failed to send request.'); return; }
             setInvite(data.invite);
             setLink(data.onboardingUrl || '');
+            setSuccess(`Onboarding request sent${applicantName ? ` to ${applicantName}` : ''} — a secure link was emailed.`);
             onChanged?.();
         } finally {
             setBusy(null);
@@ -79,7 +81,7 @@ export function RequestOnboardingModal({ applicationId, applicantName, forms, on
     };
 
     const act = async (action: 'revoke' | 'regenerate' | 'cancel') => {
-        setBusy(action as any); setError('');
+        setBusy(action as any); setError(''); setSuccess('');
         try {
             const res = await fetch(`/api/admin/onboarding/invite/${applicationId}`, {
                 method: 'PATCH',
@@ -92,6 +94,7 @@ export function RequestOnboardingModal({ applicationId, applicantName, forms, on
             if (data.onboardingUrl) setLink(data.onboardingUrl);
             if (action === 'revoke' || action === 'cancel') setLink('');
             if (action === 'cancel') { setFormIds([]); setDocKeys([]); setConfirmCancelOpen(false); }
+            setSuccess(action === 'revoke' ? 'Onboarding link revoked.' : action === 'regenerate' ? 'Link regenerated and re-emailed.' : 'Onboarding request cancelled.');
             onChanged?.();
         } finally {
             setBusy(null);
@@ -162,12 +165,17 @@ export function RequestOnboardingModal({ applicationId, applicantName, forms, on
                                 </div>
                             )}
 
+                            {success && (
+                                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-500 inline-flex items-center gap-1.5">
+                                    <Check className="h-3.5 w-3.5" /> {success}
+                                </div>
+                            )}
                             {error && <p className="text-xs text-rose-500">{error}</p>}
                         </>
                     )}
                 </div>
 
-                <div className="shrink-0 flex items-center justify-between gap-2 px-6 py-4 border-t border-border-modal bg-surface-modal">
+                <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-6 py-4 border-t border-border-modal bg-surface-modal">
                     <div className="flex gap-2">
                         {invite && invite.status === 'active' && hasRequest && (
                             <button onClick={() => act('revoke')} disabled={busy !== null} title="Disable the link but keep what was requested (you can regenerate later)" className="px-3 py-2 rounded-xl text-xs font-bold border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 disabled:opacity-60 inline-flex items-center gap-1.5">

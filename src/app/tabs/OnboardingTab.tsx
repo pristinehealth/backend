@@ -634,7 +634,8 @@ export function OnboardingTab() {
                         ) : rows.length === 0 ? (
                             <div className="text-center py-16 text-sm text-text-muted">No accepted candidates match these filters.</div>
                         ) : (
-                            <table className="w-full text-sm">
+                            <div className="overflow-x-auto">
+                            <table className="w-full min-w-[720px] text-sm">
                                 <thead>
                                     <tr className="text-[10px] uppercase tracking-wider text-text-muted border-b border-border-card">
                                         <th className="text-left font-bold px-4 py-3">Candidate</th>
@@ -800,6 +801,7 @@ export function OnboardingTab() {
                                     })}
                                 </tbody>
                             </table>
+                            </div>
                         )}
                     </div>
 
