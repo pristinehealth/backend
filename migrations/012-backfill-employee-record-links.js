@@ -20,6 +20,8 @@
  *
  * Preview (writes nothing):  node migrations/012-backfill-employee-record-links.js --dry-run
  * Apply:                     node migrations/012-backfill-employee-record-links.js
+ * Add --verbose to either to also log each RESOLVED row with its applicant email
+ * and the record it linked to (capped at 50 per collection).
  */
 
 const mongoose = require('mongoose');
@@ -88,11 +90,11 @@ async function buildIndex(models) {
   return { resolve, diagnose, emailFor, recordCount: records.length };
 }
 
-// Cap on how many unresolved rows we print per collection (avoids flooding a
-// large prod run); the count is always exact, only the per-row detail is capped.
-const UNRESOLVED_LOG_CAP = 50;
+// Cap on how many rows we print per collection (avoids flooding a large prod
+// run); the counts are always exact, only the per-row detail is capped.
+const ROW_LOG_CAP = 50;
 
-async function backfillCollection(Model, label, fields, index, dryRun) {
+async function backfillCollection(Model, label, fields, index, dryRun, verbose) {
   const { resolve, diagnose, emailFor } = index;
   const rows = await Model.find({
     $or: [{ employeeRecordId: null }, { employeeRecordId: { $exists: false } }],
@@ -100,6 +102,7 @@ async function backfillCollection(Model, label, fields, index, dryRun) {
 
   let updated = 0;
   const unresolvedRows = [];
+  const resolvedSamples = []; // {row, rid}, only collected under --verbose
   for (const row of rows) {
     if (!isUnset(row.employeeRecordId)) continue; // defensive
     const rid = resolve({ applicationId: row.applicationId, applicantEmail: row.applicantEmail });
@@ -108,14 +111,27 @@ async function backfillCollection(Model, label, fields, index, dryRun) {
       await Model.updateOne({ _id: row._id }, { $set: { employeeRecordId: new mongoose.Types.ObjectId(rid) } });
     }
     updated += 1;
+    if (verbose && resolvedSamples.length < ROW_LOG_CAP) resolvedSamples.push({ row, rid });
   }
 
   const unresolved = unresolvedRows.length;
   console.log(`[012] ${label}: ${rows.length} missing → ${updated} ${dryRun ? 'would set' : 'set'}, ${unresolved} unresolved${dryRun ? ' (dry-run)' : ''}.`);
 
+  // --verbose: show the applicant email each resolved row linked to (and which record).
+  if (verbose) {
+    resolvedSamples.forEach(({ row, rid }) => {
+      const ref = { applicationId: row.applicationId, applicantEmail: row.applicantEmail };
+      const bits = [`_id=${row._id}`, `appId=${row.applicationId ?? '—'}`, `email=${emailFor(ref) || '—'}`];
+      if (row.documentType) bits.push(`type=${row.documentType}`);
+      bits.push(`→ record ${rid}`);
+      console.log(`        ✓ ${bits.join('  ')}`);
+    });
+    if (updated > ROW_LOG_CAP) console.log(`        ✓ …and ${updated - ROW_LOG_CAP} more (detail capped)`);
+  }
+
   // Per-row detail on what couldn't be resolved + a reason, so a prod run is
   // self-explanatory (deleted-application orphans vs. a real gap).
-  unresolvedRows.slice(0, UNRESOLVED_LOG_CAP).forEach((row) => {
+  unresolvedRows.slice(0, ROW_LOG_CAP).forEach((row) => {
     const ref = { applicationId: row.applicationId, applicantEmail: row.applicantEmail };
     const bits = [`_id=${row._id}`, `appId=${row.applicationId ?? '—'}`, `email=${emailFor(ref) || '—'}`];
     if (row.documentType) bits.push(`type=${row.documentType}`);
@@ -123,8 +139,8 @@ async function backfillCollection(Model, label, fields, index, dryRun) {
     bits.push(`→ ${diagnose(ref)}`);
     console.log(`        · ${bits.join('  ')}`);
   });
-  if (unresolved > UNRESOLVED_LOG_CAP) {
-    console.log(`        · …and ${unresolved - UNRESOLVED_LOG_CAP} more (detail capped)`);
+  if (unresolved > ROW_LOG_CAP) {
+    console.log(`        · …and ${unresolved - ROW_LOG_CAP} more (detail capped)`);
   }
 
   return { label, missing: rows.length, updated, unresolved };
@@ -132,6 +148,7 @@ async function backfillCollection(Model, label, fields, index, dryRun) {
 
 async function up(models, opts) {
   const dryRun = !!(opts && opts.dryRun);
+  const verbose = !!(opts && opts.verbose);
   if (dryRun) console.log('[012-backfill-employee-record-links] DRY RUN — no writes will be performed.\n');
   const m = resolveModels(models);
 
@@ -139,10 +156,10 @@ async function up(models, opts) {
   console.log(`[012] indexed ${index.recordCount} employee record(s).`);
 
   const results = [];
-  results.push(await backfillCollection(m.JobApplication, 'JobApplication', 'employeeRecordId applicantEmail', index, dryRun));
-  results.push(await backfillCollection(m.OnboardingInvite, 'OnboardingInvite', 'employeeRecordId applicationId applicantEmail', index, dryRun));
-  results.push(await backfillCollection(m.OnboardingResponse, 'OnboardingResponse', 'employeeRecordId applicationId applicantEmail', index, dryRun));
-  results.push(await backfillCollection(m.ApplicationDocument, 'ApplicationDocument', 'employeeRecordId applicationId documentType status', index, dryRun));
+  results.push(await backfillCollection(m.JobApplication, 'JobApplication', 'employeeRecordId applicantEmail', index, dryRun, verbose));
+  results.push(await backfillCollection(m.OnboardingInvite, 'OnboardingInvite', 'employeeRecordId applicationId applicantEmail', index, dryRun, verbose));
+  results.push(await backfillCollection(m.OnboardingResponse, 'OnboardingResponse', 'employeeRecordId applicationId applicantEmail', index, dryRun, verbose));
+  results.push(await backfillCollection(m.ApplicationDocument, 'ApplicationDocument', 'employeeRecordId applicationId documentType status', index, dryRun, verbose));
 
   const totalUnresolved = results.reduce((n, r) => n + r.unresolved, 0);
   if (totalUnresolved > 0) {
@@ -157,10 +174,11 @@ module.exports = { up };
 if (require.main === module) {
   const { connect, disconnect, buildModels } = require('./lib/db');
   const dryRun = process.argv.includes('--dry-run');
+  const verbose = process.argv.includes('--verbose');
   (async () => {
     await connect();
     try {
-      await up(buildModels(), { dryRun });
+      await up(buildModels(), { dryRun, verbose });
     } finally {
       await disconnect();
     }
