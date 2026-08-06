@@ -1,6 +1,21 @@
 # Plan: `EmployeeRecord` — a person-centric identity hub
 
-**Status:** Phases 0–1 implemented; Phases 2–3 pending.
+**Status:** Phases 0–1 implemented; Phase 2 re-scoped (see note) and implemented; Phase 3 pending.
+
+> **Phase 2 re-scope (decided during implementation):** under the chosen "relax
+> only, keep applicationId required" option, the index relaxation and record-scoped
+> onboarding reads turn out to belong in **Phase 3** — they're only needed for a
+> staff member with *no* application (nullable `applicationId`). Switching the
+> onboarding *track* reads to `employeeRecordId` now would also leak a person's
+> other applications into a single-application view. So **Phase 2 = person-centric
+> compliance materialization only** (safe groundwork, no behavior change for
+> single-application users); **Phase 3** now owns nullable `applicationId`, the
+> index migration (`013`), record-scoped reads, and the staff entry point.
+>
+> **Phase 2 delivered:** `linkApplicationDocumentsToStaff` ([documentHelpers.ts](../src/lib/documentHelpers.ts))
+> resolves the application's `EmployeeRecord`, materializes the person's verified
+> documents across all their applications, and keys compliance on `record.staffId`
+> — each with a fallback to the previous application-scoped behavior.
 **Author:** drafted with Claude Code
 **Decision inputs (confirmed):** phased — *full plan first*; identity is *email-primary
 with manual merge*.
