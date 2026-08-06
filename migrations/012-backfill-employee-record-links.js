@@ -70,27 +70,58 @@ async function buildIndex(models) {
     return null;
   };
 
-  return { resolve, recordCount: records.length };
+  // Explain WHY a row didn't resolve, so orphans (a deleted application) are
+  // distinguishable from a real gap (a missing record → run 011) or a bug.
+  const diagnose = ({ applicationId, applicantEmail }) => {
+    if (applicationId && !appEmail.has(String(applicationId))) return 'application not found (deleted → orphan)';
+    const email = norm(applicantEmail) || (applicationId ? appEmail.get(String(applicationId)) : '');
+    if (!email) return 'application has blank email — no person to key on';
+    if (!recordByEmail.has(email)) return `email "${email}" has no EmployeeRecord (run 011)`;
+    return 'unexpected — should have resolved (possible resolver bug)';
+  };
+
+  return { resolve, diagnose, recordCount: records.length };
 }
 
-async function backfillCollection(Model, label, fields, resolve, dryRun) {
+// Cap on how many unresolved rows we print per collection (avoids flooding a
+// large prod run); the count is always exact, only the per-row detail is capped.
+const UNRESOLVED_LOG_CAP = 50;
+
+async function backfillCollection(Model, label, fields, index, dryRun) {
+  const { resolve, diagnose } = index;
   const rows = await Model.find({
     $or: [{ employeeRecordId: null }, { employeeRecordId: { $exists: false } }],
   }).select(fields).lean();
 
   let updated = 0;
-  let unresolved = 0;
+  const unresolvedRows = [];
   for (const row of rows) {
     if (!isUnset(row.employeeRecordId)) continue; // defensive
     const rid = resolve({ applicationId: row.applicationId, applicantEmail: row.applicantEmail });
-    if (!rid) { unresolved += 1; continue; }
+    if (!rid) { unresolvedRows.push(row); continue; }
     if (!dryRun) {
       await Model.updateOne({ _id: row._id }, { $set: { employeeRecordId: new mongoose.Types.ObjectId(rid) } });
     }
     updated += 1;
   }
 
+  const unresolved = unresolvedRows.length;
   console.log(`[012] ${label}: ${rows.length} missing → ${updated} ${dryRun ? 'would set' : 'set'}, ${unresolved} unresolved${dryRun ? ' (dry-run)' : ''}.`);
+
+  // Per-row detail on what couldn't be resolved + a reason, so a prod run is
+  // self-explanatory (deleted-application orphans vs. a real gap).
+  unresolvedRows.slice(0, UNRESOLVED_LOG_CAP).forEach((row) => {
+    const bits = [`_id=${row._id}`, `appId=${row.applicationId ?? '—'}`];
+    if (row.documentType) bits.push(`type=${row.documentType}`);
+    if (row.status) bits.push(`status=${row.status}`);
+    if (row.applicantEmail) bits.push(`email=${row.applicantEmail}`);
+    bits.push(`→ ${diagnose({ applicationId: row.applicationId, applicantEmail: row.applicantEmail })}`);
+    console.log(`        · ${bits.join('  ')}`);
+  });
+  if (unresolved > UNRESOLVED_LOG_CAP) {
+    console.log(`        · …and ${unresolved - UNRESOLVED_LOG_CAP} more (detail capped)`);
+  }
+
   return { label, missing: rows.length, updated, unresolved };
 }
 
@@ -99,14 +130,14 @@ async function up(models, opts) {
   if (dryRun) console.log('[012-backfill-employee-record-links] DRY RUN — no writes will be performed.\n');
   const m = resolveModels(models);
 
-  const { resolve, recordCount } = await buildIndex(m);
-  console.log(`[012] indexed ${recordCount} employee record(s).`);
+  const index = await buildIndex(m);
+  console.log(`[012] indexed ${index.recordCount} employee record(s).`);
 
   const results = [];
-  results.push(await backfillCollection(m.JobApplication, 'JobApplication', 'employeeRecordId applicantEmail', resolve, dryRun));
-  results.push(await backfillCollection(m.OnboardingInvite, 'OnboardingInvite', 'employeeRecordId applicationId applicantEmail', resolve, dryRun));
-  results.push(await backfillCollection(m.OnboardingResponse, 'OnboardingResponse', 'employeeRecordId applicationId applicantEmail', resolve, dryRun));
-  results.push(await backfillCollection(m.ApplicationDocument, 'ApplicationDocument', 'employeeRecordId applicationId', resolve, dryRun));
+  results.push(await backfillCollection(m.JobApplication, 'JobApplication', 'employeeRecordId applicantEmail', index, dryRun));
+  results.push(await backfillCollection(m.OnboardingInvite, 'OnboardingInvite', 'employeeRecordId applicationId applicantEmail', index, dryRun));
+  results.push(await backfillCollection(m.OnboardingResponse, 'OnboardingResponse', 'employeeRecordId applicationId applicantEmail', index, dryRun));
+  results.push(await backfillCollection(m.ApplicationDocument, 'ApplicationDocument', 'employeeRecordId applicationId documentType status', index, dryRun));
 
   const totalUnresolved = results.reduce((n, r) => n + r.unresolved, 0);
   if (totalUnresolved > 0) {
