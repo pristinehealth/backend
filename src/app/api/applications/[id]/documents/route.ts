@@ -5,6 +5,7 @@ import ApplicationDocument, { type DocumentType } from '@/models/ApplicationDocu
 import JobApplication from '@/models/JobApplication';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { getApplicationDocumentRequirements } from '@/lib/compliance';
+import { resolveEmployeeRecordIdByEmail } from '@/lib/employeeRecord';
 
 interface MultiPartFormData {
   get(key: string): File | string | null;
@@ -71,10 +72,16 @@ export async function POST(
     const cloudinaryData = await uploadRes.json() as any;
     const fileUrl = cloudinaryData.secure_url;
 
-    // Create document record
+    // Create document record. Dual-write the person-centric owner (EmployeeRecord,
+    // Phase 1); best-effort, migration 012 backfills a miss.
     const expiryDate = expiryDateStr ? new Date(expiryDateStr) : null;
+    const employeeRecordId = await resolveEmployeeRecordIdByEmail(application.applicantEmail, {
+      name: application.applicantName,
+      applicationId: appId,
+    });
     const doc = await ApplicationDocument.create({
       applicationId: appId,
+      employeeRecordId,
       documentType,
       fileUrl,
       fileName: file.name,

@@ -15,6 +15,10 @@ export type OnboardingInviteStatus = 'active' | 'completed' | 'revoked' | 'expir
 
 export interface OnboardingInviteDocument extends mongoose.Document {
     applicationId: mongoose.Types.ObjectId;
+    // Person-centric owner (EmployeeRecord). Phase 1: dual-written alongside
+    // applicationId and backfilled by migration 012; not yet read. In Phase 2 the
+    // "one active invite per person" uniqueness moves here from applicationId.
+    employeeRecordId?: mongoose.Types.ObjectId | null;
     applicantEmail: string;
     applicantName: string;
     jobId?: mongoose.Types.ObjectId | null;
@@ -37,6 +41,12 @@ const OnboardingInviteSchema = new mongoose.Schema<OnboardingInviteDocument>(
             ref: 'JobApplication',
             required: true,
             unique: true, // one active invite per application (mutable)
+        },
+        employeeRecordId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'EmployeeRecord',
+            default: null,
+            index: true,
         },
         applicantEmail: { type: String, default: '', lowercase: true, trim: true },
         applicantName: { type: String, default: '' },
@@ -61,6 +71,13 @@ const OnboardingInviteSchema = new mongoose.Schema<OnboardingInviteDocument>(
     },
     { timestamps: true }
 );
+
+// Drop a stale cached model that predates the `employeeRecordId` path so a
+// hot-reloaded dev server recompiles instead of silently stripping the new field.
+const cachedInvite = mongoose.models.OnboardingInvite as mongoose.Model<OnboardingInviteDocument> | undefined;
+if (cachedInvite && !cachedInvite.schema.path('employeeRecordId')) {
+    delete (mongoose.models as Record<string, unknown>).OnboardingInvite;
+}
 
 export default (mongoose.models.OnboardingInvite as mongoose.Model<OnboardingInviteDocument>) ||
     mongoose.model<OnboardingInviteDocument>('OnboardingInvite', OnboardingInviteSchema);

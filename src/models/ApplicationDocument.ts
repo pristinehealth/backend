@@ -25,6 +25,11 @@ export type DocumentStatus = 'pending' | 'verified' | 'rejected' | 'expired';
 
 export interface ApplicationDocumentDocument extends mongoose.Document {
   applicationId: mongoose.Types.ObjectId;
+  // Person-centric owner (EmployeeRecord). Phase 1: dual-written + backfilled by
+  // migration 012; not yet read. In later phases this becomes the primary owner
+  // so a document follows the person across positions, and `applicationId` is
+  // retained only as provenance.
+  employeeRecordId?: mongoose.Types.ObjectId | null;
   documentType: DocumentType;
   deliveryMethod: 'upload' | 'email';
   fileUrl: string;
@@ -47,6 +52,12 @@ const ApplicationDocumentSchema = new mongoose.Schema<ApplicationDocumentDocumen
       type: mongoose.Schema.Types.ObjectId,
       ref: 'JobApplication',
       required: true,
+      index: true,
+    },
+    employeeRecordId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'EmployeeRecord',
+      default: null,
       index: true,
     },
     // Dynamic: a compliance requirement key. No enum constraint.
@@ -79,7 +90,7 @@ const ApplicationDocumentSchema = new mongoose.Schema<ApplicationDocumentDocumen
 const cachedApplicationDocument = mongoose.models.ApplicationDocument as
   | mongoose.Model<ApplicationDocumentDocument>
   | undefined;
-if (cachedApplicationDocument && !cachedApplicationDocument.schema.path('value')) {
+if (cachedApplicationDocument && (!cachedApplicationDocument.schema.path('value') || !cachedApplicationDocument.schema.path('employeeRecordId'))) {
   delete (mongoose.models as Record<string, unknown>).ApplicationDocument;
 }
 

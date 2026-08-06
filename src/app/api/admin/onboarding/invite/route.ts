@@ -9,6 +9,7 @@ import OnboardingInvite from '@/models/OnboardingInvite';
 import { getComplianceRequirements } from '@/lib/compliance';
 import { sendOnboardingInviteEmail } from '@/lib/mailer';
 import { buildOnboardingUrl, ONBOARDING_INVITE_TTL_MS } from '@/lib/onboardingInvite';
+import { resolveEmployeeRecordIdByEmail } from '@/lib/employeeRecord';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +57,13 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Onboarding can only be requested for accepted applications.' }, { status: 400 });
         }
 
+        // Person-centric owner (EmployeeRecord, Phase 1 dual-write) stamped on the
+        // onboarding responses + invite created below. Best-effort; backfilled by 012.
+        const employeeRecordId = await resolveEmployeeRecordIdByEmail(application.applicantEmail, {
+            name: application.applicantName,
+            applicationId: application._id,
+        });
+
         // The checked questionnaires are AUTHORITATIVE: mark them applicant-fill,
         // and revert any previously-requested one that was unchecked back to
         // admin-fill (so it stays in the packet but leaves the applicant's view).
@@ -85,6 +93,7 @@ export async function POST(request: Request) {
                 } else {
                     await OnboardingResponse.create({
                         applicationId,
+                        employeeRecordId,
                         onboardingFormId: form._id,
                         assignee: 'applicant',
                         formName: form.name || '',
@@ -125,6 +134,7 @@ export async function POST(request: Request) {
             { applicationId },
             {
                 $set: {
+                    employeeRecordId,
                     applicantEmail: application.applicantEmail,
                     applicantName: application.applicantName,
                     jobId: application.jobId,

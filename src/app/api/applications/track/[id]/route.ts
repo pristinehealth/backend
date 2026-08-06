@@ -12,6 +12,7 @@ import { buildDocumentFileRef, buildFieldFileRef, isFileProxyRef } from '@/lib/a
 import { resolveFileReference } from '@/lib/uploadResolve';
 import { getApplicationDocumentRequirements } from '@/lib/compliance';
 import { deleteAssetByPublicId } from '@/lib/cloudinary';
+import { resolveEmployeeRecordIdByEmail } from '@/lib/employeeRecord';
 
 export const dynamic = 'force-dynamic';
 
@@ -331,6 +332,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const docIsFile = (docType: DocumentType) =>
       requiresFileByType.has(docType) ? !!requiresFileByType.get(docType) : requiresFileUpload(docType);
 
+    // Dual-write the person-centric owner (EmployeeRecord, Phase 1) onto any docs
+    // created below. Best-effort; migration 012 backfills a miss.
+    const employeeRecordId = await resolveEmployeeRecordIdByEmail(application.applicantEmail, {
+      name: application.applicantName,
+      applicationId: application._id,
+    });
+
     const normalizedDocs = await Promise.all(submittedDocs
       .filter((doc) => doc && doc.documentType)
       // Metadata-only docs persist a typed value instead of a file; keep one only
@@ -342,6 +350,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         if (!isFile) {
           return {
             applicationId: application._id,
+            employeeRecordId,
             documentType: doc.documentType as DocumentType,
             deliveryMethod: 'email' as const,
             fileUrl: '',
@@ -354,6 +363,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         }
         return {
           applicationId: application._id,
+          employeeRecordId,
           documentType: doc.documentType as DocumentType,
           deliveryMethod: doc.deliveryMethod === 'email' ? 'email' : 'upload',
           // A proxy ref means "unchanged" → keep the existing stored URL. Otherwise

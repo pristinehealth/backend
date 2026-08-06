@@ -1,6 +1,6 @@
 # Plan: `EmployeeRecord` — a person-centric identity hub
 
-**Status:** Phase 0 implemented (model + backfill migration); Phases 1–3 pending.
+**Status:** Phases 0–1 implemented; Phases 2–3 pending.
 **Author:** drafted with Claude Code
 **Decision inputs (confirmed):** phased — *full plan first*; identity is *email-primary
 with manual merge*.
@@ -8,6 +8,13 @@ with manual merge*.
 > **Phase 0 delivered:** `src/models/EmployeeRecord.ts` + `migrations/011-seed-employee-records.js`.
 > Additive and read-only for existing collections; nothing in the app reads
 > `EmployeeRecord` yet. Preview with `node migrations/011-seed-employee-records.js --dry-run`.
+>
+> **Phase 1 delivered:** optional `employeeRecordId` added to `JobApplication`,
+> `OnboardingInvite`, `OnboardingResponse`, `ApplicationDocument`, **dual-written**
+> on every create path via `src/lib/employeeRecord.ts` (`resolveEmployeeRecordIdByEmail`,
+> best-effort — never blocks the primary write). `migrations/012-backfill-employee-record-links.js`
+> backfills existing rows. Still no reads switched. **Deploy order:** merge/deploy
+> the Phase 1 code first (new rows get the id), then run `012` to backfill old rows.
 
 ---
 
