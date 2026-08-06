@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
     Loader2, Upload, Eye, CheckCircle2, AlertCircle, Lock, Download, FileText,
-    ArrowLeft, ClipboardList, ShieldCheck, PartyPopper,
+    ArrowLeft, ClipboardList, ShieldCheck, PartyPopper, X,
 } from "lucide-react";
 import { PublicHeader } from "@/components/PublicHeader";
 import { resolveFieldType, toDateInputValue } from "@/lib/formFields";
@@ -63,8 +63,18 @@ export default function OnboardingClient({ trackApiBase }: { trackApiBase: strin
     const [uploadedPublicIds, setUploadedPublicIds] = useState<string[]>([]);
     const [busyKey, setBusyKey] = useState<string>('');
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+    // File currently open in the in-page viewer modal.
+    const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null);
 
     useEffect(() => { setClientSessionId(crypto.randomUUID()); }, []);
+
+    // Close the file viewer on Escape.
+    useEffect(() => {
+        if (!viewerFile) return;
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setViewerFile(null); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [viewerFile]);
     const cred = useMemo(() => new URLSearchParams({ email, accessToken: token }).toString(), [email, token]);
 
     const load = async () => {
@@ -148,8 +158,11 @@ export default function OnboardingClient({ trackApiBase }: { trackApiBase: strin
         setUploadedPublicIds((prev) => [...prev, data.public_id]);
         return { public_id: data.public_id };
     };
-    const previewNew = (publicId: string) => window.open(`/api/upload/preview?publicId=${encodeURIComponent(publicId)}&clientSessionId=${encodeURIComponent(clientSessionId)}`, '_blank');
-    const previewExisting = (ref: string) => window.open(ref, '_blank');
+    // In-page file viewer (same pattern as the track page) — keeps the storage
+    // URL out of a new tab and avoids popup blockers.
+    const previewNew = (publicId: string, name?: string) =>
+        setViewerFile({ url: `/api/upload/preview?publicId=${encodeURIComponent(publicId)}&clientSessionId=${encodeURIComponent(clientSessionId)}`, name: name || 'Uploaded file' });
+    const previewExisting = (ref: string, name?: string) => setViewerFile({ url: ref, name: name || 'Document' });
 
     const setAnswer = (rid: string, name: string, value: any) => setAnswers((prev) => ({ ...prev, [rid]: { ...prev[rid], [name]: value } }));
     const onAnswerFile = async (rid: string, field: CustomField, file: File | null) => {
@@ -353,6 +366,36 @@ export default function OnboardingClient({ trackApiBase }: { trackApiBase: strin
                     </div>
                 </div>
             </div>
+
+            {/* In-page file viewer — images in <img>, everything else (PDF, etc.) in
+                an <iframe> relying on the content-type the proxy streams back. */}
+            {viewerFile && (() => {
+                const src = viewerFile.url || '';
+                const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(viewerFile.name || '');
+                return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setViewerFile(null)}>
+                        <div className="w-full max-w-4xl h-[85vh] rounded-2xl border border-border-modal bg-surface-modal shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sidebar-border">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <FileText className="h-4 w-4 text-brand-primary shrink-0" />
+                                    <p className="text-sm font-bold text-text-primary truncate">{viewerFile.name}</p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                    <a href={src} download className="p-2 rounded-lg text-text-secondary hover:bg-slate-200/60 dark:hover:bg-white/[0.06] transition-colors" title="Download"><Download className="h-4 w-4" /></a>
+                                    <button type="button" onClick={() => setViewerFile(null)} className="p-2 rounded-lg text-text-secondary hover:bg-slate-200/60 dark:hover:bg-white/[0.06] transition-colors" title="Close"><X className="h-4 w-4" /></button>
+                                </div>
+                            </div>
+                            <div className="flex-1 bg-slate-100 dark:bg-black/40 overflow-auto flex items-center justify-center">
+                                {isImage ? (
+                                    <img src={src} alt={viewerFile.name} className="max-w-full max-h-full object-contain" />
+                                ) : (
+                                    <iframe src={src} title={viewerFile.name} className="w-full h-full border-0" />
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
         </div>
     );
 }
@@ -390,7 +433,7 @@ function FieldInput({ field, value, setValue, onFile, fileName, busyKey, fieldEr
                     const isNew = typeof value === 'string' && value && !value.startsWith('/api/');
                     if (isExisting || isNew) return (
                         <div className="flex items-center gap-3">
-                            <button type="button" onClick={() => (isExisting ? previewExisting(value) : previewNew(value))} className="text-xs font-semibold text-brand-primary inline-flex items-center gap-1"><Eye className="h-3 w-3" /> {isNew ? (fileName || 'Uploaded file') : 'View uploaded file'}</button>
+                            <button type="button" onClick={() => (isExisting ? previewExisting(value, fileName || 'Uploaded file') : previewNew(value, fileName || 'Uploaded file'))} className="text-xs font-semibold text-brand-primary inline-flex items-center gap-1"><Eye className="h-3 w-3" /> {isNew ? (fileName || 'Uploaded file') : 'View uploaded file'}</button>
                             <label className="text-xs font-bold text-brand-primary cursor-pointer">Replace<input type="file" className="hidden" accept={ALLOWED.join(',')} onChange={(e) => onFile(field, e.target.files?.[0] || null)} /></label>
                         </div>
                     );
@@ -470,7 +513,7 @@ function DocumentsStep({ requirements, docUploads, docIsFile, onDocFile, onDocVa
                         {isFile ? (
                             u.publicId || u.fileRef ? (
                                 <div className="flex items-center gap-3">
-                                    <button type="button" onClick={() => (u.publicId ? previewNew(u.publicId) : previewExisting(u.fileRef))} className="text-xs font-semibold text-brand-primary inline-flex items-center gap-1"><Eye className="h-3 w-3" /> {u.fileName || 'View uploaded file'}</button>
+                                    <button type="button" onClick={() => (u.publicId ? previewNew(u.publicId, u.fileName) : previewExisting(u.fileRef, u.fileName))} className="text-xs font-semibold text-brand-primary inline-flex items-center gap-1"><Eye className="h-3 w-3" /> {u.fileName || 'View uploaded file'}</button>
                                     <label className="text-xs font-bold text-brand-primary cursor-pointer">Replace<input type="file" className="hidden" accept={ALLOWED.join(',')} onChange={(e) => onDocFile(r.documentType, e.target.files?.[0] || null)} /></label>
                                 </div>
                             ) : (
