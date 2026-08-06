@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { resolveFieldType, toDateInputValue } from "@/lib/formFields";
 import { RequestOnboardingModal } from "./onboarding/RequestOnboardingModal";
+import { StaffOnboardingModal } from "./onboarding/StaffOnboardingModal";
 import { FormsLibraryManager } from "./onboarding/FormsLibraryManager";
 import { CandidateOnboardingDetail } from "./onboarding/CandidateOnboardingDetail";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -93,6 +94,7 @@ export function OnboardingTab() {
     const [subTab, setSubTab] = useState<'candidates' | 'questionnaires' | 'library'>('candidates');
     // Candidate the admin is composing an onboarding request for.
     const [requestRow, setRequestRow] = useState<OnboardingRow | null>(null);
+    const [showStaffOnboard, setShowStaffOnboard] = useState(false);
     const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
 
     // ── Questionnaires (builder) ──────────────────────────────────────────
@@ -563,9 +565,17 @@ export function OnboardingTab() {
 
     return (
         <div className="space-y-6">
-            <div>
-                <h2 className="text-2xl font-black text-text-primary tracking-tight">Onboarding</h2>
-                <p className="text-sm text-text-muted mt-1">Build onboarding questionnaires and complete them for accepted candidates.</p>
+            <div className="flex items-start justify-between gap-4">
+                <div>
+                    <h2 className="text-2xl font-black text-text-primary tracking-tight">Onboarding</h2>
+                    <p className="text-sm text-text-muted mt-1">Build onboarding questionnaires and complete them for accepted candidates.</p>
+                </div>
+                <button
+                    onClick={() => setShowStaffOnboard(true)}
+                    className="shrink-0 inline-flex items-center gap-1.5 bg-brand-primary hover:bg-brand-primary-dark text-white font-bold text-xs px-4 py-2 rounded-xl"
+                >
+                    <UserCheck className="h-4 w-4" /> Onboard existing staff
+                </button>
             </div>
 
             {/* Sub-tabs */}
@@ -849,6 +859,15 @@ export function OnboardingTab() {
                     applicantName={requestRow.applicantName}
                     forms={forms}
                     onClose={() => setRequestRow(null)}
+                    onChanged={() => void fetchRows()}
+                />
+            )}
+
+            {/* ── Onboard existing staff (no application) ─────────────────── */}
+            {showStaffOnboard && (
+                <StaffOnboardingModal
+                    forms={forms}
+                    onClose={() => setShowStaffOnboard(false)}
                     onChanged={() => void fetchRows()}
                 />
             )}

@@ -14,7 +14,7 @@ import mongoose from 'mongoose';
 export type OnboardingInviteStatus = 'active' | 'completed' | 'revoked' | 'expired';
 
 export interface OnboardingInviteDocument extends mongoose.Document {
-    applicationId: mongoose.Types.ObjectId;
+    applicationId?: mongoose.Types.ObjectId | null;
     // Person-centric owner (EmployeeRecord). Phase 1: dual-written alongside
     // applicationId and backfilled by migration 012; not yet read. In Phase 2 the
     // "one active invite per person" uniqueness moves here from applicationId.
@@ -36,12 +36,17 @@ export interface OnboardingInviteDocument extends mongoose.Document {
 
 const OnboardingInviteSchema = new mongoose.Schema<OnboardingInviteDocument>(
     {
+        // Optional (Phase 3): an invite for an existing staff member with no
+        // application has none. Uniqueness ("one invite per application") is
+        // enforced by the partial index below instead of an inline unique, so
+        // multiple staff invites (applicationId null) don't collide on null.
         applicationId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'JobApplication',
-            required: true,
-            unique: true, // one active invite per application (mutable)
+            default: null,
         },
+        // The person this invite belongs to. For staff invites this is the only
+        // owner. One invite per person is enforced in the create paths (upsert).
         employeeRecordId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'EmployeeRecord',
@@ -70,6 +75,14 @@ const OnboardingInviteSchema = new mongoose.Schema<OnboardingInviteDocument>(
         createdByEmail: { type: String, default: '' },
     },
     { timestamps: true }
+);
+
+// One active invite per application — partial so staff invites (no applicationId)
+// don't collide on a shared null. Replaces the old inline `unique: true`; the
+// legacy `applicationId_1` unique index is dropped by migration 013.
+OnboardingInviteSchema.index(
+    { applicationId: 1 },
+    { unique: true, name: 'applicationId_unique_partial', partialFilterExpression: { applicationId: { $type: 'objectId' } } }
 );
 
 // Drop a stale cached model that predates the `employeeRecordId` path so a

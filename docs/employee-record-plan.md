@@ -1,6 +1,17 @@
 # Plan: `EmployeeRecord` — a person-centric identity hub
 
-**Status:** Phases 0–1 implemented; Phase 2 re-scoped (see note) and implemented; Phase 3 pending.
+**Status:** Phases 0–3 implemented. Phase 3 delivers the feature: onboarding an existing staff member with no application.
+
+> **Phase 3 delivered:** `applicationId` is now optional on OnboardingInvite/
+> OnboardingResponse/ApplicationDocument; uniqueness moved to `employeeRecordId`
+> (partial). Migration `013` drops the legacy application-keyed unique indexes and
+> builds the record-keyed ones (with a duplicate guard). New `staff-invite` API +
+> record-based track API (shared core `onboardingTrackCore.ts`, serving both the
+> applicant `[applicationId]` route and the new `by-record/[recordId]` route),
+> record-based onboarding page `/onboarding/r/[employeeRecordId]` (shared
+> `OnboardingClient`), and an "Onboard existing staff" admin modal. **Deploy
+> order:** deploy the code, then run `013` (after `012`). Follow-up (not in this
+> phase): record-based revoke/regenerate management for staff invites.
 
 > **Phase 2 re-scope (decided during implementation):** under the chosen "relax
 > only, keep applicationId required" option, the index relaxation and record-scoped
