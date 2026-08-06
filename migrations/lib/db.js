@@ -12,7 +12,10 @@
  *    the SAME model name as their `src/models/*.ts` counterparts, so Mongoose
  *    derives an identical collection name to the running app.
  */
-require('dotenv').config({ path: '.env' });
+const path = require('path');
+// Load the backend-root .env no matter which directory the migration is invoked
+// from (e.g. from inside migrations/), so MONGO_URI is always found.
+require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 const mongoose = require('mongoose');
 
 const MONGODB_URI = process.env.MONGO_URI || '';

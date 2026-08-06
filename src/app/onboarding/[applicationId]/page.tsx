@@ -408,17 +408,46 @@ function FieldInput({ field, value, setValue, onFile, fileName, busyKey, fieldEr
 }
 
 function QuestionnaireStep({ q, answers, setAnswer, onFile, fileNames, busyKey, fieldErrors, previewNew, previewExisting }: any) {
+    // Group fields by their form section (in first-appearance order). Headings
+    // only show when the questionnaire actually defines named sections.
+    const fields: CustomField[] = q.fields || [];
+    const order: string[] = [];
+    const bySection = new Map<string, CustomField[]>();
+    for (const f of fields) {
+        const s = (f.section && f.section.trim()) || '';
+        if (!bySection.has(s)) { bySection.set(s, []); order.push(s); }
+        bySection.get(s)!.push(f);
+    }
+    const hasSections = order.some((s) => s !== '');
+
+    const renderField = (field: CustomField) => (
+        <FieldInput key={field.name} field={field} rid={q.responseId} value={answers[field.name]} fileName={fileNames[field.name]}
+            setValue={(v: any) => setAnswer(field.name, v)} onFile={onFile} busyKey={busyKey} fieldErrors={fieldErrors}
+            previewNew={previewNew} previewExisting={previewExisting} />
+    );
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between gap-2 pb-1 border-b border-border-card">
                 <h2 className="text-sm font-black uppercase tracking-widest text-brand-primary">{q.formName}</h2>
                 {q.status === 'completed' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase bg-emerald-500/10 text-emerald-500 border-emerald-500/20">Completed</span>}
             </div>
-            {q.fields.length === 0 ? <p className="text-sm text-text-muted">No questions.</p> : q.fields.map((field: CustomField) => (
-                <FieldInput key={field.name} field={field} rid={q.responseId} value={answers[field.name]} fileName={fileNames[field.name]}
-                    setValue={(v: any) => setAnswer(field.name, v)} onFile={onFile} busyKey={busyKey} fieldErrors={fieldErrors}
-                    previewNew={previewNew} previewExisting={previewExisting} />
-            ))}
+            {fields.length === 0 ? (
+                <p className="text-sm text-text-muted">No questions.</p>
+            ) : !hasSections ? (
+                order.flatMap((s) => bySection.get(s)!).map(renderField)
+            ) : (
+                order.map((sectionName, sIdx) => (
+                    <div key={sectionName || `__unsectioned-${sIdx}`} className="space-y-6">
+                        {sectionName && (
+                            <div className={sIdx === 0 ? '' : 'border-t border-sidebar-border dark:border-white/[0.06] pt-6'}>
+                                <h3 className="text-sm font-black uppercase text-brand-primary tracking-widest">{sectionName}</h3>
+                            </div>
+                        )}
+                        {bySection.get(sectionName)!.map(renderField)}
+                    </div>
+                ))
+            )}
         </div>
     );
 }
