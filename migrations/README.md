@@ -26,6 +26,7 @@ All steps are **idempotent** — safe to run repeatedly.
 |---|------|--------------|-------------|
 | 001 | `001-seed-compliance-requirements.js` | Upserts `ComplianceRequirement` docs from `data/complianceRequirements.js` | Upsert keyed on `key`; re-run updates definitions in place |
 | 002 | `002-backfill-staff-compliance.js` | Creates a `StaffComplianceRecord` per active staff × requirement, backfills `ComplianceEvidence` from existing `StaffDocument` / verified `ApplicationDocument`, and writes `ComplianceEvent` audit rows | Records use `$setOnInsert` (existing records never overwritten); evidence + events written only on first insert |
+| 011 | `011-seed-employee-records.js` | Seeds the person-centric `EmployeeRecord` hub (Phase 0): one record per human keyed by email and/or Perfex `staffId`, gathering their `applicationIds`. Additive — reads applications + staff, writes only `employeerecords`. Creates the unique partial indexes. | Upserts keyed on email / staffId; re-run converges. Ambiguous identity (email bound to a different staffId) is logged, never auto-merged |
 
 ## Collection-name safety
 
