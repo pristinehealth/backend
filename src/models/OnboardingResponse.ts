@@ -10,6 +10,9 @@ import type { AdminNote } from './JobApplication';
 // it 'completed'.
 export interface OnboardingResponseDocument extends mongoose.Document {
     applicationId: mongoose.Types.ObjectId;
+    // Person-centric owner (EmployeeRecord). Phase 1: dual-written + backfilled by
+    // migration 012; not yet read. Phase 2 keys reads on this instead.
+    employeeRecordId?: mongoose.Types.ObjectId | null;
     onboardingFormId: mongoose.Types.ObjectId;
     jobId?: mongoose.Types.ObjectId | null;
     applicantName: string;
@@ -50,6 +53,12 @@ const OnboardingResponseSchema = new mongoose.Schema<OnboardingResponseDocument>
             required: true,
             // NOT unique — a candidate holds one record per assigned
             // questionnaire. Uniqueness is enforced on the pair below.
+        },
+        employeeRecordId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'EmployeeRecord',
+            default: null,
+            index: true,
         },
         onboardingFormId: {
             type: mongoose.Schema.Types.ObjectId,
@@ -112,7 +121,7 @@ OnboardingResponseSchema.index({ applicationId: 1, order: 1 });
 // Drop a stale cached model that predates the `assignee` path so the schema
 // recompiles instead of silently stripping it (mirrors OnboardingForm's guard).
 const cachedResponse = mongoose.models.OnboardingResponse as mongoose.Model<OnboardingResponseDocument> | undefined;
-if (cachedResponse && !cachedResponse.schema.path('assignee')) {
+if (cachedResponse && (!cachedResponse.schema.path('assignee') || !cachedResponse.schema.path('employeeRecordId'))) {
     delete (mongoose.models as Record<string, unknown>).OnboardingResponse;
 }
 

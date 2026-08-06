@@ -11,6 +11,7 @@ import { verifyApplicationAccess } from '@/lib/applicationAccess';
 import { getComplianceRequirements } from '@/lib/compliance';
 import { validateAnswers } from '@/lib/onboardingAnswers';
 import { resolveFileReference } from '@/lib/uploadResolve';
+import { resolveEmployeeRecordIdByEmail } from '@/lib/employeeRecord';
 import { requiresFileUpload, metadataValueError, sanitizeMetadataValue, getDocumentLabel } from '@/lib/documentMetadata';
 import {
     buildOnboardingAnswerFileRef,
@@ -256,6 +257,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ap
             }
         }
 
+        // Person-centric owner for any documents created below (EmployeeRecord,
+        // Phase 1 dual-write; best-effort, migration 012 backfills a miss).
+        const employeeRecordId = await resolveEmployeeRecordIdByEmail(application.applicantEmail, {
+            name: application.applicantName,
+            applicationId: application._id,
+        });
+
         // Upsert each provided document (never delete — onboarding saves are additive).
         for (const sub of submittedDocs) {
             if (!sub?.documentType) continue;
@@ -288,7 +296,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ap
                     await existingDoc.save();
                 } else {
                     await ApplicationDocument.create({
-                        applicationId: application._id, documentType: dt, deliveryMethod: 'upload',
+                        applicationId: application._id, employeeRecordId, documentType: dt, deliveryMethod: 'upload',
                         fileUrl, fileName, value: '', expiryDate, uploadedAt: new Date(), status: 'pending',
                     });
                 }
@@ -311,7 +319,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ap
                     await existingDoc.save();
                 } else {
                     await ApplicationDocument.create({
-                        applicationId: application._id, documentType: dt, deliveryMethod: 'email',
+                        applicationId: application._id, employeeRecordId, documentType: dt, deliveryMethod: 'email',
                         fileUrl: '', fileName: '', value, expiryDate: null, uploadedAt: new Date(), status: 'pending',
                     });
                 }

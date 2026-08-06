@@ -9,6 +9,7 @@ import OnboardingResponse from '@/models/OnboardingResponse';
 import OnboardingInvite from '@/models/OnboardingInvite';
 import { rollUpOnboarding } from '@/lib/onboardingProgress';
 import { getComplianceRequirements } from '@/lib/compliance';
+import { resolveEmployeeRecordIdByEmail } from '@/lib/employeeRecord';
 
 export const dynamic = 'force-dynamic';
 
@@ -192,11 +193,18 @@ export async function POST(request: Request) {
         // admin picked them in.
         let nextOrder = existing.reduce((max: number, r: any) => Math.max(max, r.order || 0), -1) + 1;
 
+        // Person-centric owner (EmployeeRecord, Phase 1 dual-write); backfilled by 012.
+        const employeeRecordId = await resolveEmployeeRecordIdByEmail(application.applicantEmail, {
+            name: application.applicantName,
+            applicationId: application._id,
+        });
+
         const created = await OnboardingResponse.insertMany(
             toCreate.map((form: any) => {
                 const fields = Array.isArray(form.customFields) ? form.customFields : [];
                 return {
                     applicationId,
+                    employeeRecordId,
                     onboardingFormId: form._id,
                     formName: form.name || '',
                     order: nextOrder++,
