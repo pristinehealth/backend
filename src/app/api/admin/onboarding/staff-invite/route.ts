@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import dbConnect from '@/lib/mongoose';
 import Staff from '@/models/Staff';
+import EmployeeRecord from '@/models/EmployeeRecord';
 import OnboardingForm from '@/models/OnboardingForm';
 import OnboardingResponse from '@/models/OnboardingResponse';
 import OnboardingInvite from '@/models/OnboardingInvite';
@@ -18,6 +19,33 @@ async function isAdmin() {
     if (!session || !session.user) return false;
     const role = (session.user as any).role;
     return role === 'admin' || role === 'superadmin';
+}
+
+// Current staff-onboarding invite state for the admin modal — resolves the
+// staff member's EmployeeRecord (WITHOUT creating one) and returns its id, email,
+// and any existing invite, so the modal can prefill and manage it.
+export async function GET(request: Request) {
+    try {
+        if (!(await isAdmin())) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+        await dbConnect();
+        const { searchParams } = new URL(request.url);
+        const staffId = (searchParams.get('staffId') || '').trim();
+        if (!staffId) return NextResponse.json({ error: 'staffId is required' }, { status: 400 });
+
+        const record = await EmployeeRecord.findOne({ staffId }).select('_id email name').lean();
+        if (!record) return NextResponse.json({ employeeRecordId: null, email: null, invite: null });
+        const invite = await OnboardingInvite.findOne({ employeeRecordId: (record as any)._id }).lean();
+        return NextResponse.json({
+            employeeRecordId: String((record as any)._id),
+            email: (record as any).email || null,
+            invite: invite || null,
+        });
+    } catch (error: any) {
+        console.error('GET /api/admin/onboarding/staff-invite error:', error);
+        return NextResponse.json({ error: 'Internal Server Error', details: error.message }, { status: 500 });
+    }
 }
 
 // Onboard an EXISTING STAFF member who has no application (Phase 3). Resolves the

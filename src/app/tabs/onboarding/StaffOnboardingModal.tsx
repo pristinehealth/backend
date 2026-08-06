@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, X, Copy, Check, Send, Search, UserCheck } from "lucide-react";
+import { Loader2, X, Copy, Check, Send, Search, UserCheck, Ban, RotateCcw, Trash2 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 interface FormOption { _id: string; name: string; customFields?: unknown[] }
 interface RequirementOption { key: string; label: string; evidenceMode?: string }
 interface StaffOption { staffid: string; full_name?: string; firstname?: string; lastname?: string; email?: string }
+interface InviteState { status: string; expiresAt?: string; onboardingFormIds?: string[]; requestedDocumentKeys?: string[] }
 
 interface Props {
     forms: FormOption[];
@@ -30,8 +32,12 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
     const [formIds, setFormIds] = useState<string[]>([]);
     const [docKeys, setDocKeys] = useState<string[]>([]);
 
+    const [invite, setInvite] = useState<InviteState | null>(null);
+    const [employeeRecordId, setEmployeeRecordId] = useState('');
     const [link, setLink] = useState('');
     const [busy, setBusy] = useState(false);
+    const [busyAction, setBusyAction] = useState<'revoke' | 'regenerate' | 'cancel' | null>(null);
+    const [confirmCancel, setConfirmCancel] = useState(false);
     const [error, setError] = useState('');
     const [copied, setCopied] = useState(false);
 
@@ -65,11 +71,25 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
         ).slice(0, 30);
     }, [staff, query]);
 
-    const pick = (s: StaffOption) => {
+    const pick = async (s: StaffOption) => {
         setSelected(s);
         setEmail(s.email || '');
-        setLink('');
-        setError('');
+        setLink(''); setError('');
+        setInvite(null); setEmployeeRecordId(''); setFormIds([]); setDocKeys([]);
+        // Load any existing invite for this staff member so the admin can manage it.
+        try {
+            const res = await fetch(`/api/admin/onboarding/staff-invite?staffId=${encodeURIComponent(s.staffid)}`);
+            const data = await res.json();
+            if (res.ok) {
+                setEmployeeRecordId(data.employeeRecordId || '');
+                if (data.email && !s.email) setEmail(data.email);
+                if (data.invite) {
+                    setInvite(data.invite);
+                    setFormIds((data.invite.onboardingFormIds || []).map(String));
+                    setDocKeys(data.invite.requestedDocumentKeys || []);
+                }
+            }
+        } catch { /* ignore — modal still works for a fresh invite */ }
     };
 
     const toggle = (arr: string[], set: (v: string[]) => void, v: string) =>
@@ -89,11 +109,34 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
             const data = await res.json();
             if (!res.ok) { setError(data?.error || 'Failed to generate the onboarding link.'); return; }
             setLink(data.onboardingUrl || '');
+            if (data.employeeRecordId) setEmployeeRecordId(data.employeeRecordId);
+            if (data.invite) setInvite(data.invite);
             onChanged?.();
         } finally {
             setBusy(false);
         }
     };
+
+    const act = async (action: 'revoke' | 'regenerate' | 'cancel') => {
+        if (!employeeRecordId) return;
+        setBusyAction(action); setError('');
+        try {
+            const res = await fetch(`/api/admin/onboarding/staff-invite/${employeeRecordId}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
+            });
+            const data = await res.json();
+            if (!res.ok) { setError(data?.error || 'Action failed.'); return; }
+            setInvite(data.invite || null);
+            if (data.onboardingUrl) setLink(data.onboardingUrl);
+            if (action === 'revoke' || action === 'cancel') setLink('');
+            if (action === 'cancel') { setFormIds([]); setDocKeys([]); setConfirmCancel(false); }
+            onChanged?.();
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const hasRequest = !!invite && (((invite.onboardingFormIds?.length || 0) > 0) || ((invite.requestedDocumentKeys?.length || 0) > 0));
 
     const copy = async () => {
         if (!link) return;
@@ -147,6 +190,12 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
 
                             {selected && (
                                 <>
+                                    {invite && hasRequest && (
+                                        <div className={`rounded-xl border px-3 py-2 text-xs font-bold ${invite.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : invite.status === 'revoked' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'ui-card-soft text-text-secondary border-border-card'}`}>
+                                            Link status: {invite.status.toUpperCase()}{invite.expiresAt ? ` · expires ${new Date(invite.expiresAt).toLocaleDateString()}` : ''}
+                                        </div>
+                                    )}
+
                                     {/* Email (required for the link) */}
                                     <div className="space-y-1.5">
                                         <p className="text-[10px] font-black uppercase tracking-wider text-text-muted">Email for the secure link</p>
@@ -194,12 +243,41 @@ export function StaffOnboardingModal({ forms, onClose, onChanged }: Props) {
                     )}
                 </div>
 
-                <div className="shrink-0 flex items-center justify-end gap-2 px-6 py-4 border-t border-border-modal bg-surface-modal">
-                    <button onClick={generate} disabled={busy || loading || !selected} className="px-5 py-2 rounded-xl text-xs font-bold bg-brand-primary text-white hover:bg-brand-primary-dark disabled:opacity-60 inline-flex items-center gap-1.5">
-                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} {link ? 'Update & resend' : 'Generate link'}
+                <div className="shrink-0 flex items-center justify-between gap-2 px-6 py-4 border-t border-border-modal bg-surface-modal">
+                    <div className="flex gap-2">
+                        {invite && invite.status === 'active' && hasRequest && employeeRecordId && (
+                            <button onClick={() => act('revoke')} disabled={busyAction !== null} title="Disable the link but keep what was requested" className="px-3 py-2 rounded-xl text-xs font-bold border border-rose-500/30 text-rose-500 hover:bg-rose-500/10 disabled:opacity-60 inline-flex items-center gap-1.5">
+                                {busyAction === 'revoke' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Revoke
+                            </button>
+                        )}
+                        {invite && invite.status !== 'active' && hasRequest && employeeRecordId && (
+                            <button onClick={() => act('regenerate')} disabled={busyAction !== null} className="px-3 py-2 rounded-xl text-xs font-bold border border-brand-primary/30 text-brand-primary hover:bg-brand-primary/10 disabled:opacity-60 inline-flex items-center gap-1.5">
+                                {busyAction === 'regenerate' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Regenerate
+                            </button>
+                        )}
+                        {hasRequest && employeeRecordId && (
+                            <button onClick={() => setConfirmCancel(true)} disabled={busyAction !== null} title="Disable the link AND clear everything requested" className="px-3 py-2 rounded-xl text-xs font-bold text-text-muted hover:text-rose-500 disabled:opacity-60 inline-flex items-center gap-1.5">
+                                {busyAction === 'cancel' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Cancel request
+                            </button>
+                        )}
+                    </div>
+                    <button onClick={generate} disabled={busy || busyAction !== null || loading || !selected} className="px-5 py-2 rounded-xl text-xs font-bold bg-brand-primary text-white hover:bg-brand-primary-dark disabled:opacity-60 inline-flex items-center gap-1.5">
+                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} {invite && hasRequest ? 'Update & resend' : 'Generate link'}
                     </button>
                 </div>
             </div>
+
+            <ConfirmDialog
+                open={confirmCancel}
+                tone="danger"
+                title="Cancel this request?"
+                message="The link will be disabled and all requested questionnaires and documents will be removed. Anything already submitted is kept."
+                confirmLabel="Cancel request"
+                cancelLabel="Keep request"
+                busy={busyAction === 'cancel'}
+                onConfirm={() => act('cancel')}
+                onClose={() => setConfirmCancel(false)}
+            />
         </div>
     );
 }
