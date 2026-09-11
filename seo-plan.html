@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pristine Health — SEO Plan</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#ffffff; --ink:#12151b; --muted:#5c6675; --line:#e6e9ee;
+    --brand:#e8792b; --brand-ink:#b45812; --blue:#2f66b3; --green:#1f9d63; --amber:#c9861a; --red:#d23f52;
+    --chip:#eef1f5;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:32px 20px 80px}
+  header.hero{background:linear-gradient(135deg,#1a1f2b,#232b3a);color:#fff;border-radius:18px;padding:34px 30px;margin-bottom:26px}
+  header.hero .eyebrow{font-size:11px;font-weight:800;letter-spacing:.22em;text-transform:uppercase;color:#f0a970}
+  header.hero h1{margin:.35em 0 .2em;font-size:30px;line-height:1.15}
+  header.hero p{margin:0;color:#c3cad6;max-width:70ch}
+  .meta{margin-top:14px;font-size:12px;color:#8b95a5}
+  h2{font-size:20px;margin:34px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+  h3{font-size:15px;margin:22px 0 8px;color:var(--brand-ink);text-transform:uppercase;letter-spacing:.04em;font-weight:800}
+  p{margin:.5em 0}
+  a{color:var(--blue);text-decoration:none} a:hover{text-decoration:underline}
+  code{background:var(--chip);padding:1px 6px;border-radius:6px;font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:14px 0;box-shadow:0 1px 2px rgba(20,25,40,.04)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .callout{border-left:4px solid var(--brand);background:#fff7f0;border-radius:10px;padding:14px 16px;margin:14px 0}
+  .callout.blue{border-color:var(--blue);background:#eef4fc}
+  .callout.green{border-color:var(--green);background:#eefaf3}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13.5px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:800}
+  tr:last-child td{border-bottom:none}
+  .chip{display:inline-block;background:var(--chip);border-radius:999px;padding:2px 10px;margin:2px 3px 2px 0;font-size:12px;font-weight:600}
+  .badge{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;border:1px solid transparent}
+  .b-code{background:#eef4fc;color:var(--blue);border-color:#cfe0f5}
+  .b-ops{background:#fff2e0;color:var(--brand-ink);border-color:#f6d6ad}
+  .b-crit{background:#fdeef0;color:var(--red);border-color:#f6c9d0}
+  .b-high{background:#fff6e2;color:var(--amber);border-color:#f4e0af}
+  .b-med{background:#eef1f5;color:var(--muted);border-color:#dde2ea}
+  .b-done{background:#eefaf3;color:var(--green);border-color:#c6ecd6}
+  ul{margin:.4em 0 .4em 0;padding-left:20px} li{margin:3px 0}
+  .toc{columns:2;column-gap:26px;font-size:14px}
+  @media(max-width:720px){.toc{columns:1}}
+  .toc a{display:block;padding:3px 0}
+  .route{font:13px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;background:#0f1420;color:#d7e0ee;border-radius:12px;padding:14px 16px;overflow:auto}
+  .route .c{color:#6f7f97}
+  .muted{color:var(--muted)}
+  .kv{display:flex;gap:10px;flex-wrap:wrap}
+  footer{margin-top:40px;color:var(--muted);font-size:12px;text-align:center}
+  .phase{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px dashed var(--line)}
+  .phase:last-child{border-bottom:none}
+  .phase .n{flex:0 0 auto;width:34px;height:34px;border-radius:10px;background:var(--brand);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}
+  .phase .n.f{background:#3a4356}
+  @media print{body{background:#fff}.card{box-shadow:none}header.hero{background:#1a1f2b !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">Pristine Health Staffing</div>
+  <h1>SEO Plan — Combined Strategy &amp; Implementation</h1>
+  <p>Merges the marketing/SEO strategy (two acquisition systems: Facility Staffing + Home Care, service&nbsp;×&nbsp;customer&nbsp;×&nbsp;geography) with a technical audit of the Next.js app that must host it.</p>
+  <div class="meta">Repo: <code>JOHN_KARIUNGI/backend</code> (Next.js App Router) · Reference doc, not code · Last updated 2026-08-27</div>
+</header>
+
+<div class="callout">
+  <strong>The one thing to understand first.</strong> The strategy is entirely <strong>buyer-facing</strong> — facility administrators and families looking for care. This repo today is a <strong>candidate-facing ATS</strong> whose public pages (<code>/</code>, <code>/jobs</code>, <code>/jobs/[id]</code>) are all client-rendered with <strong>no structured data, no sitemap/robots, and thin metadata</strong> — so search engines currently see almost nothing. The plan below builds the buyer marketing site as new <strong>server-rendered</strong> pages in this same app, on the SEO foundation that's currently missing. Candidate/job pages are secondary — the strategy is explicit that nurse/caregiver <em>job-seeker</em> traffic is not the goal.
+</div>
+
+<h2>Contents</h2>
+<div class="card toc">
+  <a href="#audit">1 · Technical audit (current state)</a>
+  <a href="#arch">2 · Site architecture &amp; routes</a>
+  <a href="#foundation">3 · SEO technical foundation</a>
+  <a href="#facility">4 · Facility Staffing SEO</a>
+  <a href="#homecare">5 · Home Care SEO</a>
+  <a href="#geo">6 · Geographic / location hubs</a>
+  <a href="#homepage">7 · Homepage &amp; the two-audience split</a>
+  <a href="#schema">8 · Schema markup</a>
+  <a href="#cta">9 · CTAs &amp; intake forms</a>
+  <a href="#content">10 · Content (facilities vs families)</a>
+  <a href="#offsite">11 · Off-site: GBP, reviews, Ads</a>
+  <a href="#phases">12 · Phased build plan</a>
+  <a href="#first">13 · Priority: 10 revenue pages first</a>
+  <a href="#decisions">14 · Decisions needed</a>
+</div>
+
+<p><span class="badge b-code">CODE</span> = I build it in the repo &nbsp; <span class="badge b-ops">OPERATIONAL</span> = you/marketing do it (off-code)</p>
+
+<h2 id="audit">1 · Technical audit — current state</h2>
+<div class="card">
+<table>
+  <tr><th>Area</th><th>Status</th><th>Finding</th></tr>
+  <tr><td>Public pages rendering</td><td><span class="badge b-crit">Critical</span></td><td><code>/</code>, <code>/jobs</code>, <code>/jobs/[id]</code> are all <code>"use client"</code> + <code>useEffect</code> fetch. Crawlers get an empty JS shell — no job titles, descriptions, or content in the HTML.</td></tr>
+  <tr><td>JobPosting structured data</td><td><span class="badge b-crit">Absent</span></td><td>Zero JSON-LD anywhere. No eligibility for Google&nbsp;for&nbsp;Jobs.</td></tr>
+  <tr><td>sitemap.ts / robots.ts</td><td><span class="badge b-crit">Absent</span></td><td>Neither exists; no <code>public/robots.txt</code>. No crawl guidance.</td></tr>
+  <tr><td>Root metadata</td><td><span class="badge b-high">Thin</span></td><td>Only <code>title</code>/<code>description</code> ("Management Portal and Applicant Tracking System" — an ATS blurb) + icons. No <code>metadataBase</code>, OpenGraph, Twitter, robots, canonical. <code>&lt;html lang="en"&gt;</code> is set ✓.</td></tr>
+  <tr><td>Per-page metadata</td><td><span class="badge b-high">Absent</span></td><td>No <code>generateMetadata</code> / per-page <code>metadata</code> on landing, listings, or job detail.</td></tr>
+  <tr><td>Canonical / OG images</td><td><span class="badge b-med">Absent</span></td><td>No canonicals, no OG/Twitter tags, no referenced OG image.</td></tr>
+  <tr><td>Production base URL</td><td><span class="badge b-high">Missing</span></td><td>Only <code>NEXTAUTH_URL=http://localhost:3000</code>. No <code>NEXT_PUBLIC_BASE_URL</code>. Nothing (canonical/sitemap/JSON-LD) works with a localhost origin.</td></tr>
+</table>
+</div>
+<h3>JobPosition fields available for schema</h3>
+<div class="card">
+  <p><code>title</code> ✓ · <code>location</code> (US state) + <code>city</code> ✓ · <code>sections[]</code> (<code>{label,content}</code> → concatenate to <code>description</code>) ✓ · <code>createdAt</code> → <code>datePosted</code> ✓ · <code>imageUrl</code> (Cloudinary) → image ✓ · <code>status</code> (public = <code>open</code>) ✓</p>
+  <p class="muted"><strong>Missing for a complete JobPosting:</strong> <code>employmentType</code>, <code>baseSalary</code>, <code>validThrough</code>, <code>hiringOrganization</code> (env-sourced). These would be small new fields on the model + job builder.</p>
+</div>
+
+<h2 id="arch">2 · Site architecture &amp; routes</h2>
+<p>Build the strategy as a <strong>data-driven taxonomy</strong> (service × customer × geography), not ~40 hand-coded pages — hand-coding invites the "doorway/duplicate" penalty. Each entry (<code>slug, title, h1, metaDescription, keywords[], bodySections[], faqs[]</code>) renders a unique, server-rendered, statically-generated page.</p>
+<div class="route">
+<span class="c"># Buyer marketing site (NEW — server components, generateStaticParams + generateMetadata)</span>
+/facility-staffing/
+/facility-staffing/[service]     <span class="c">cna · lpn · rn · med-tech · caregiver · 1-to-1-support ·</span>
+                                 <span class="c">assisted-living · skilled-nursing · memory-care ·</span>
+                                 <span class="c">behavioral-health · emergency-staffing</span>
+/home-care/
+/home-care/[service]             <span class="c">personal-care · companion-care · respite-care · dementia-care ·</span>
+                                 <span class="c">overnight-care · 24-hour-care · post-hospital-care · 1-to-1-care</span>
+/locations/[city]                <span class="c">seattle-wa · bellevue-wa · tacoma-wa · everett-wa · renton-wa ·</span>
+                                 <span class="c">kent-wa · auburn-wa · federal-way-wa · lynnwood-wa</span>
+/resources/  ·  /resources/[slug]  <span class="c"># content hub (facilities + families)</span>
+
+<span class="c"># Existing (candidate ATS — gets JobPosting schema, secondary priority)</span>
+/  ·  /jobs  ·  /jobs/[id]
+
+<span class="c"># Auth-gated — robots DISALLOW</span>
+/dashboard  ·  /onboarding  ·  /jobs/track  ·  /api
+</div>
+<div class="callout blue"><strong>City hubs, not cloned pages.</strong> Each <code>/locations/[city]</code> is one page linking to every relevant service (facility + home care) with genuine local info — <em>not</em> "CNA staffing Seattle / …Bellevue / …Tacoma" with only the city swapped. Scaling to a new city = one data entry.</div>
+
+<h2 id="foundation">3 · SEO technical foundation <span class="badge b-code">CODE</span></h2>
+<p>Applies to every page above; the marketing strategy can't rank without it.</p>
+<div class="card">
+<ul>
+  <li><strong>Server-render</strong> the public pages (server component fetching Mongo directly; a small client child keeps interactive bits like the apply form). Add ISR (<code>revalidate</code>). <span class="badge b-crit">prerequisite</span></li>
+  <li><strong><code>NEXT_PUBLIC_BASE_URL</code></strong> + <code>metadataBase</code> in root layout.</li>
+  <li><strong>Reusable JSON-LD components</strong> (see §8) rendered server-side.</li>
+  <li><strong><code>sitemap.ts</code></strong> — enumerate all taxonomy pages + open jobs from Mongo.</li>
+  <li><strong><code>robots.ts</code></strong> — allow marketing routes; disallow <code>/dashboard</code>, <code>/onboarding</code>, <code>/jobs/track</code>, <code>/api</code>; point to sitemap.</li>
+  <li><strong><code>generateMetadata</code></strong> per page (title/description/canonical/OG) from the taxonomy data.</li>
+  <li><strong>OG images</strong> — per-service default + per-job <code>imageUrl</code>; fix root title/description to a careers+care pitch.</li>
+</ul>
+</div>
+
+<h2 id="facility">4 · Facility Staffing SEO <span class="badge b-code">CODE</span> pages · <span class="badge b-ops">OPS</span> copy</h2>
+<p>Target <strong>buyers</strong> (administrators, DONs, staffing coordinators, operators) — <em>not</em> "healthcare staffing" (too broad, attracts job seekers).</p>
+<div class="grid">
+  <div class="card"><h3>Very-high priority keyword themes</h3>
+    <span class="chip">healthcare staffing agency Washington</span><span class="chip">nursing staffing agency Washington</span><span class="chip">CNA staffing agency</span><span class="chip">CNA staffing agency Seattle</span><span class="chip">temporary nursing staffing</span><span class="chip">nursing home staffing agency</span><span class="chip">assisted living staffing agency</span><span class="chip">skilled nursing staffing agency</span>
+  </div>
+  <div class="card"><h3>High priority</h3>
+    <span class="chip">LPN staffing agency</span><span class="chip">RN staffing agency</span><span class="chip">med tech staffing agency</span><span class="chip">memory care staffing agency</span><span class="chip">senior living staffing agency</span><span class="chip">healthcare staffing near me</span><span class="chip">per diem nursing staff</span><span class="chip">short notice CNA staffing</span><span class="chip">emergency healthcare staffing</span><span class="chip">temporary CNA / LPN / RN staffing</span>
+  </div>
+</div>
+<div class="card"><h3>Operational-problem searches (strong commercial intent)</h3>
+  <span class="chip">last minute CNA staffing</span><span class="chip">same day CNA staffing</span><span class="chip">call out coverage nursing</span><span class="chip">nursing shift coverage</span><span class="chip">weekend nursing staffing</span><span class="chip">overnight CNA staffing</span><span class="chip">staffing agency for nursing homes</span><span class="chip">staffing agency for assisted living</span><span class="chip">1:1 sitter staffing</span><span class="chip">patient sitter / observer staffing</span><span class="chip">behavioral health staffing agency</span>
+</div>
+<div class="card"><h3>Dedicated pages by facility type (with example on-page targets)</h3>
+<table>
+  <tr><th>Route</th><th>SEO title / H1</th><th>Targets</th></tr>
+  <tr><td><code>/facility-staffing/assisted-living/</code></td><td>Assisted Living Staffing Agency in Washington · <em>"Reliable Staffing for Assisted Living Communities"</em></td><td>assisted living staffing agency · assisted living CNA staffing · senior living staffing · temporary staff for assisted living</td></tr>
+  <tr><td><code>/facility-staffing/skilled-nursing/</code></td><td>Skilled Nursing / SNF Staffing</td><td>skilled nursing staffing agency · SNF staffing · nursing home CNA staffing · LPN/RN staffing nursing homes</td></tr>
+  <tr><td><code>/facility-staffing/memory-care/</code></td><td>Memory Care Staffing</td><td>memory care staffing agency · memory care caregivers · CNA staffing memory care</td></tr>
+  <tr><td><code>/facility-staffing/1-to-1-support/</code></td><td>1:1 / Patient Sitter Staffing <span class="badge b-high">niche to own</span></td><td>1:1 sitter staffing · patient sitter/observer staffing · behavioral/hospital/resident sitter · 24 hour sitter care</td></tr>
+</table></div>
+
+<h2 id="homecare">5 · Home Care SEO <span class="badge b-code">CODE</span> pages · <span class="badge b-ops">OPS</span> copy</h2>
+<p>Families don't search "staffing agency" — they search the <strong>problem</strong>. Use "near me", city modifiers, and private-pay language to separate families from job seekers and publicly-funded searches.</p>
+<div class="card">
+  <span class="chip">home care near me</span><span class="chip">in home care near me</span><span class="chip">senior home care near me</span><span class="chip">caregiver for elderly near me</span><span class="chip">private caregiver near me</span><span class="chip">in home caregiver Seattle</span><span class="chip">elderly care at home</span><span class="chip">home care for elderly parents</span><span class="chip">private pay home care</span><span class="chip">non medical home care</span><span class="chip">24 hour home care</span><span class="chip">overnight caregiver</span><span class="chip">companion care for seniors</span><span class="chip">personal care for seniors</span><span class="chip">respite care near me</span><span class="chip">dementia care at home</span><span class="chip">Alzheimer's home care</span><span class="chip">post hospital home care</span>
+  <p class="muted" style="margin-top:10px">Pages: personal-care · companion-care · respite-care · dementia-care · overnight-care · 24-hour-care · post-hospital-care · 1-to-1-care.</p>
+</div>
+
+<h2 id="geo">6 · Geographic / location hubs <span class="badge b-code">CODE</span> template · <span class="badge b-ops">OPS</span> local content</h2>
+<div class="card">
+  <p>Priority markets: <span class="chip">Seattle</span><span class="chip">Tacoma</span><span class="chip">Bellevue</span><span class="chip">Everett</span><span class="chip">Kent</span><span class="chip">Renton</span><span class="chip">Federal Way</span><span class="chip">Auburn</span><span class="chip">Lynnwood</span> then expand.</p>
+  <p><strong>Model:</strong> <code>/locations/seattle-wa/</code> → H1 "Healthcare Staffing &amp; Home Care in Seattle, WA", with two sections (<em>Facility Staffing in Seattle</em>: CNA/Caregiver/Med Tech/LPN/RN/1:1/short-notice · <em>Home Care in Seattle</em>: personal/companion/respite/dementia/overnight/24-hour), each linking back to the specialty service pages. Requires genuinely useful local content per city (not cloned).</p>
+</div>
+
+<h2 id="homepage">7 · Homepage &amp; the two-audience split <span class="badge b-code">CODE</span></h2>
+<div class="card">
+  <p><strong>SEO Title:</strong> Healthcare Staffing &amp; Home Care in Washington | Pristine Health</p>
+  <p><strong>Meta:</strong> Pristine Health provides reliable healthcare staffing and personalized in-home care throughout Washington. CNA, caregiver, Med Tech, LPN, RN and 1:1 support available for facilities and families.</p>
+  <p><strong>H1:</strong> Healthcare Staffing &amp; In-Home Care Across Washington</p>
+  <div class="grid" style="margin-top:10px">
+    <div class="callout blue" style="margin:0"><strong>For Healthcare Facilities</strong><br>Reliable CNA, Caregiver, Med Tech, LPN, RN and 1:1 staffing for senior living, skilled nursing, memory care and healthcare organizations. → <strong>Request Staffing</strong></div>
+    <div class="callout green" style="margin:0"><strong>For Families</strong><br>Dependable in-home caregivers providing personal care, companionship, respite and individualized support. → <strong>Find Home Care</strong></div>
+  </div>
+  <p class="muted">The split also helps Google understand the two distinct service categories.</p>
+</div>
+
+<h2 id="schema">8 · Schema markup <span class="badge b-code">CODE</span></h2>
+<div class="card">
+<table>
+  <tr><th>Type</th><th>Where</th></tr>
+  <tr><td><code>Organization</code> + <code>WebSite</code> + <code>ContactPoint</code></td><td>Root / homepage</td></tr>
+  <tr><td><code>LocalBusiness</code> (w/ <code>areaServed</code>)</td><td>Each <code>/locations/[city]</code></td></tr>
+  <tr><td><code>Service</code></td><td>Each facility &amp; home-care service page</td></tr>
+  <tr><td><code>BreadcrumbList</code></td><td>All nested pages</td></tr>
+  <tr><td><code>FAQPage</code></td><td>Where genuine FAQs exist (service &amp; content pages)</td></tr>
+  <tr><td><code>JobPosting</code></td><td>Each <code>/jobs/[id]</code> → Google for Jobs</td></tr>
+  <tr><td><code>AggregateRating</code></td><td class="muted">Only once real reviews exist &amp; compliant — deferred</td></tr>
+</table>
+<p class="muted">Schema + explicit on-page service descriptions matter for traditional search <em>and</em> AI-driven discovery.</p>
+</div>
+
+<h2 id="cta">9 · CTAs &amp; intake forms <span class="badge b-code">CODE</span></h2>
+<div class="card">
+  <p><strong>Two separate flows everywhere — never one generic "Contact Us".</strong></p>
+  <div class="grid">
+    <div class="callout blue" style="margin:0"><strong>Need Staffing Coverage?</strong><br>Tell us the position, shift and facility location. → <strong>Request Staffing</strong></div>
+    <div class="callout green" style="margin:0"><strong>Looking for Care at Home?</strong><br>Tell us about your loved one's care needs. → <strong>Request Home Care</strong></div>
+  </div>
+  <p class="muted">Reuse the app's existing form/submission infrastructure for the two intakes.</p>
+</div>
+
+<h2 id="content">10 · Content — facilities vs families <span class="badge b-code">CODE</span> hub · <span class="badge b-ops">OPS</span> writing</h2>
+<div class="grid">
+  <div class="card"><h3>For decision-makers (buyers)</h3>
+  <ul>
+    <li>How Assisted Living Facilities Can Reduce Agency Staffing Costs</li>
+    <li>What to Look for in a Healthcare Staffing Agency</li>
+    <li>CNA Staffing Requirements for Senior Living Communities</li>
+    <li>When to Use Temporary Nursing Staff</li>
+    <li>How to Cover Last-Minute CNA Call-Outs</li>
+    <li>Agency Staffing vs Internal PRN Pool</li>
+    <li>How 1:1 Staffing Can Reduce Resident Fall Risk</li>
+    <li>When Does a Resident Need 1:1 Supervision?</li>
+    <li>How Memory Care Communities Handle Staffing Shortages</li>
+  </ul></div>
+  <div class="card"><h3>For families</h3>
+  <ul>
+    <li>How Much Does Home Care Cost in Seattle?</li>
+    <li>Home Care vs Home Health Care: What's the Difference?</li>
+    <li>When Does an Elderly Parent Need Home Care?</li>
+    <li>How Much Does 24-Hour Home Care Cost?</li>
+    <li>How to Find a Caregiver for an Elderly Parent</li>
+    <li>Signs Your Parent May Need Help at Home</li>
+    <li>Companion Care vs Personal Care · How Respite Care Works</li>
+    <li>Can Someone Stay Overnight With My Elderly Parent?</li>
+    <li>Home Care After Hospital Discharge</li>
+  </ul></div>
+</div>
+<p class="muted">Avoid the common mistake of blogging for <em>workers</em> (CNA interview questions, career tips) — that's candidate traffic, not customers.</p>
+
+<h2 id="offsite">11 · Off-site — GBP, reviews, Ads <span class="badge b-ops">OPERATIONAL</span></h2>
+<div class="card">
+  <h3>Google Business Profile</h3>
+  <ul>
+    <li>Business name must be the real name: <strong>Pristine Health</strong> — do <em>not</em> keyword-stuff ("Pristine Health CNA Staffing Home Care Seattle").</li>
+    <li>Set up to <strong>20 service areas</strong> (cities served).</li>
+    <li>Put keywords under <strong>Services</strong>: Home Care, Senior/Personal/Companion/Respite/Dementia/24-Hour Care, Healthcare Staffing, CNA/Caregiver/Med Tech/LPN/RN Staffing, 1:1 Patient Support, Temporary Healthcare Staffing.</li>
+  </ul>
+  <h3>Reviews</h3>
+  <p>Ask "What service did Pristine provide, and what stood out?" — natural mentions ("helped us find a caregiver for my mother in Bellevue" / "CNA coverage for our assisted living community") build local relevance far better than "Great company!". Don't script the wording.</p>
+  <h3>Google Ads (align with SEO landing pages)</h3>
+  <p>Point ads to the matching page ("CNA staffing agency Seattle" → Seattle CNA staffing page, not the homepage). For home-care paid campaigns, add <strong>negative keywords</strong> to filter job seekers: <span class="chip">jobs</span><span class="chip">job</span><span class="chip">career(s)</span><span class="chip">hiring</span><span class="chip">salary</span><span class="chip">application</span><span class="chip">apply</span><span class="chip">CNA classes</span><span class="chip">training</span><span class="chip">certification</span><span class="chip">resume</span><span class="chip">indeed</span></p>
+</div>
+
+<h2 id="phases">12 · Phased build plan</h2>
+<div class="card">
+  <div class="phase"><div class="n f">0</div><div><strong>Foundation</strong> <span class="badge b-code">CODE</span> — <code>NEXT_PUBLIC_BASE_URL</code> + <code>metadataBase</code>, root metadata rewrite, <code>robots.ts</code>, <code>sitemap.ts</code> skeleton, JSON-LD component library. <span class="muted">Unblocks everything.</span></div></div>
+  <div class="phase"><div class="n">1</div><div><strong>Homepage split</strong> — two-audience hero + the two CTAs (§7).</div></div>
+  <div class="phase"><div class="n">2</div><div><strong>Facility hub + <code>[service]</code> template</strong> — CNA, 1:1, assisted-living, skilled-nursing, memory-care + <code>Service</code> schema (§4).</div></div>
+  <div class="phase"><div class="n">3</div><div><strong>Home Care hub + <code>[service]</code></strong> (§5).</div></div>
+  <div class="phase"><div class="n">4</div><div><strong>Location hubs</strong> — <code>LocalBusiness</code> + <code>areaServed</code> (§6).</div></div>
+  <div class="phase"><div class="n">5</div><div><strong>Resources / content</strong> + <code>FAQPage</code> (§10).</div></div>
+  <div class="phase"><div class="n f">✦</div><div><strong>Cross-cutting</strong> — the two intake forms (§9); per-page metadata + schema throughout.</div></div>
+</div>
+
+<h2 id="first">13 · Priority — 10 revenue pages before any blogs</h2>
+<div class="card">
+  <ol>
+    <li>Facility Staffing (hub)</li><li>CNA Staffing</li><li>1:1 Sitter / Patient Support</li>
+    <li>Assisted Living Staffing</li><li>Skilled Nursing Staffing</li>
+    <li>Home Care (hub)</li><li>Senior Home Care</li><li>Personal Care</li>
+    <li>24-Hour / Overnight Care</li><li>Seattle — Healthcare Staffing &amp; Home Care</li>
+  </ol>
+  <p class="muted">Then expand to Bellevue, Tacoma, Everett, Renton, Kent, Auburn, Federal Way, Lynnwood once the core service pages are strong.</p>
+</div>
+<div class="callout"><strong>Positioning to own:</strong> facility side = "<em>Last-minute healthcare staffing + 1:1 support for senior-care facilities across Washington</em>"; home-care side = "<em>Flexible in-home care that helps seniors remain safely at home</em>". Far stronger than ranking for everything under "healthcare".</div>
+
+<h2 id="decisions">14 · Decisions needed before build</h2>
+<div class="card">
+  <ol>
+    <li><strong>Production origin</strong> for <code>NEXT_PUBLIC_BASE_URL</code> — <code>https://pristinehealthstaffing.com</code>?</li>
+    <li><strong>Copy source</strong> — you provide per-page copy, or I draft SEO-structured placeholder (from these titles/keywords) for you to edit?</li>
+    <li><strong>Taxonomy as code-config or admin-editable in Mongo?</strong> Code-config ships fastest (SSG); admin-editable lets marketing edit without deploys (bigger build). Suggest: start code-config, add an editor later.</li>
+  </ol>
+  <p><strong>Suggested first PR:</strong> Phase&nbsp;0 + one exemplar <code>/facility-staffing/[service]</code> page and one <code>/locations/[city]</code> page as the template pattern (foundation + proof), then scale by data.</p>
+</div>
+
+<footer>
+  Pristine Health — combined SEO strategy &amp; implementation reference · generated by Claude Code
+</footer>
+
+</div>
+</body>
+</html>
