@@ -20,7 +20,7 @@ export default function LocationsHub() {
     return (
         <>
             <JsonLd data={breadcrumbLd([{ name: "Home", path: "/" }, { name: TITLE, path: "/locations" }])} />
-            <MarketingHero image="/healthcare_professionals_diversity.png" title="Service areas — nationwide" description={DESC}>
+            <MarketingHero image="/Pristine%20Health%20Service%20Areas%20Banner%20-%203.png" title="Service areas — nationwide" description={DESC}>
                 <CtaButtons className="mt-7" />
             </MarketingHero>
             <section className="max-w-6xl mx-auto px-4 sm:px-6 py-14">

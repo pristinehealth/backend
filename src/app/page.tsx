@@ -211,7 +211,7 @@ export default function LandingPage() {
                 {/* Parallax image + scrims */}
                 <div
                     className="absolute inset-0 bg-cover bg-center opacity-45 will-change-transform"
-                    style={{ backgroundImage: "url('/healthcare_professionals_diversity.png')", transform: `translateY(${scrollY * 0.3}px) scale(1.15)` }}
+                    style={{ backgroundImage: "url('/Pristine%20Health%20Main%20Page%20Banner%20-%201.png')", transform: `translateY(${scrollY * 0.3}px) scale(1.15)` }}
                 />
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_40%,rgba(0,0,0,0.25),rgba(9,9,11,0.92))]" />
                 <div className="absolute -top-24 right-[12%] w-[28rem] h-[28rem] bg-brand-primary/20 rounded-full blur-[150px] animate-float-slow" />

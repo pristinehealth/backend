@@ -20,7 +20,7 @@ export default function FacilityStaffingHub() {
     return (
         <>
             <JsonLd data={breadcrumbLd([{ name: "Home", path: "/" }, { name: TITLE, path: "/facility-staffing" }])} />
-            <MarketingHero image="/Facility%20Banner.png" eyebrow="For Facilities" title="Dependable healthcare staffing for facilities nationwide" description={DESC}>
+            <MarketingHero image="/Pristine%20Health%20Facility%20Banner%20-%201.png" eyebrow="For Facilities" title="Dependable healthcare staffing for facilities nationwide" description={DESC}>
                 <CtaButtons className="mt-7" />
             </MarketingHero>
             <section className="max-w-6xl mx-auto px-4 sm:px-6 py-14">
