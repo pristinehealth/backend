@@ -32,6 +32,7 @@ const OnboardingFormSchema = new mongoose.Schema<OnboardingFormDocument>(
                 required: { type: Boolean, default: false },
                 options: { type: [String], default: undefined },
                 section: { type: String, default: undefined },
+                description: { type: String, default: undefined },
             },
         ],
     },
@@ -44,7 +45,8 @@ const cachedForm = mongoose.models.OnboardingForm as mongoose.Model<OnboardingFo
 if (cachedForm) {
     const customFieldsPath = cachedForm.schema.path('customFields') as any;
     const hasSection = !!customFieldsPath?.schema?.path?.('section');
-    if (!hasSection) {
+    const hasDescription = !!customFieldsPath?.schema?.path?.('description');
+    if (!hasSection || !hasDescription) {
         delete (mongoose.models as Record<string, unknown>).OnboardingForm;
     }
 }

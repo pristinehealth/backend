@@ -24,7 +24,12 @@ export const BUILTIN_DOCUMENT_TYPES = [
 export type DocumentStatus = 'pending' | 'verified' | 'rejected' | 'expired';
 
 export interface ApplicationDocumentDocument extends mongoose.Document {
-  applicationId: mongoose.Types.ObjectId;
+  applicationId?: mongoose.Types.ObjectId | null;
+  // Person-centric owner (EmployeeRecord). Phase 1: dual-written + backfilled by
+  // migration 012; not yet read. In later phases this becomes the primary owner
+  // so a document follows the person across positions, and `applicationId` is
+  // retained only as provenance.
+  employeeRecordId?: mongoose.Types.ObjectId | null;
   documentType: DocumentType;
   deliveryMethod: 'upload' | 'email';
   fileUrl: string;
@@ -43,10 +48,19 @@ export interface ApplicationDocumentDocument extends mongoose.Document {
 
 const ApplicationDocumentSchema = new mongoose.Schema<ApplicationDocumentDocument>(
   {
+    // Optional (Phase 3): a document uploaded by a staff member with no
+    // application has none — it's owned by the person (employeeRecordId). Dedup
+    // per person+type is enforced in the upsert paths, not a DB unique index.
     applicationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'JobApplication',
-      required: true,
+      default: null,
+      index: true,
+    },
+    employeeRecordId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'EmployeeRecord',
+      default: null,
       index: true,
     },
     // Dynamic: a compliance requirement key. No enum constraint.
@@ -79,7 +93,7 @@ const ApplicationDocumentSchema = new mongoose.Schema<ApplicationDocumentDocumen
 const cachedApplicationDocument = mongoose.models.ApplicationDocument as
   | mongoose.Model<ApplicationDocumentDocument>
   | undefined;
-if (cachedApplicationDocument && !cachedApplicationDocument.schema.path('value')) {
+if (cachedApplicationDocument && (!cachedApplicationDocument.schema.path('value') || !cachedApplicationDocument.schema.path('employeeRecordId'))) {
   delete (mongoose.models as Record<string, unknown>).ApplicationDocument;
 }
 

@@ -7,6 +7,7 @@ export interface CustomFieldDefinition {
     required: boolean;
     options?: string[]; // choices for select/checkbox
     section?: string;   // form section this question belongs to (e.g. "Personal details")
+    description?: string; // optional help text shown above the question in the form
 }
 
 export interface JobSection {

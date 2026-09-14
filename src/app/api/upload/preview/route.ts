@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/mongoose';
 import UploadAsset from '@/models/UploadAsset';
-import { signedFetchUrl } from '@/lib/cloudinary';
+import { fetchStoredFile } from '@/lib/cloudinary';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,17 +30,18 @@ export async function GET(request: Request) {
 
         const sourceUrl = asset?.url || '';
         if (!/^https?:\/\//i.test(sourceUrl)) {
+            console.warn('[upload/preview] no stored url for asset', {
+                publicId,
+                assetFound: !!asset,
+                sourceUrlEmpty: !sourceUrl,
+            });
             return NextResponse.json({ error: 'File not found' }, { status: 404 });
         }
 
-        // Authenticated assets need a freshly signed URL; public ones stream
-        // as-is. Fall back to the stored URL if the signed fetch fails.
-        let upstream = await fetch(signedFetchUrl(sourceUrl));
-        if (!upstream.ok) {
-            const fallback = await fetch(sourceUrl);
-            if (fallback.ok) upstream = fallback;
-        }
-        if (!upstream.ok || !upstream.body) {
+        // Resolve + fetch with full logging (see fetchStoredFile). Authenticated
+        // PDFs go via the download API; images/raw via a signed delivery URL.
+        const upstream = await fetchStoredFile(sourceUrl, 'upload/preview');
+        if (!upstream || !upstream.body) {
             return NextResponse.json({ error: 'Unable to retrieve file' }, { status: 502 });
         }
 
@@ -55,6 +56,7 @@ export async function GET(request: Request) {
 
         return new Response(upstream.body, { status: 200, headers });
     } catch (error: any) {
+        console.error('[upload/preview] unhandled error:', error?.message || error);
         return NextResponse.json({ error: 'Internal Server Error', details: error.message }, { status: 500 });
     }
 }

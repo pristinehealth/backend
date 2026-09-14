@@ -6,7 +6,12 @@ import JobApplication from '@/models/JobApplication';
 import JobPosition from '@/models/JobPosition';
 import OnboardingForm from '@/models/OnboardingForm';
 import OnboardingResponse from '@/models/OnboardingResponse';
+import OnboardingInvite from '@/models/OnboardingInvite';
+import Staff from '@/models/Staff';
+import EmployeeRecord from '@/models/EmployeeRecord';
 import { rollUpOnboarding } from '@/lib/onboardingProgress';
+import { getComplianceRequirements } from '@/lib/compliance';
+import { resolveEmployeeRecordIdByEmail, resolveEmployeeRecordByStaff } from '@/lib/employeeRecord';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +46,13 @@ export async function GET(request: Request) {
             filter.$or = [{ applicantName: rx }, { applicantEmail: rx }];
         }
 
+        // Exclude people who are now STAFF — they belong in the Staff tab, where
+        // their full onboarding history (including from when they were a candidate)
+        // is shown via their EmployeeRecord. A record with a staffId = they're staff.
+        const staffRecords = await EmployeeRecord.find({ staffId: { $type: 'string' } }).select('applicationIds').lean();
+        const excludedAppIds = staffRecords.flatMap((r: any) => (r.applicationIds || []).map((id: any) => String(id)));
+        if (excludedAppIds.length) filter._id = { $nin: excludedAppIds };
+
         const applications = await JobApplication.find(filter)
             .select('applicantName applicantEmail jobId status createdAt updatedAt')
             .sort({ updatedAt: -1 })
@@ -51,14 +63,20 @@ export async function GET(request: Request) {
         // application rather than looked up one-to-one.
         const jobIds = Array.from(new Set(applications.map((a: any) => String(a.jobId)).filter(Boolean)));
         const appIds = applications.map((a: any) => a._id);
-        const [jobs, responses] = await Promise.all([
+        const [jobs, responses, invites, complianceReqs] = await Promise.all([
             JobPosition.find({ _id: { $in: jobIds } }).select('title').lean(),
             OnboardingResponse.find({ applicationId: { $in: appIds } })
-                .select('applicationId onboardingFormId formName order status answeredCount totalCount requiredCount startedByEmail completedAt createdAt updatedAt')
+                .select('applicationId onboardingFormId formName order status assignee answeredCount totalCount requiredCount startedByEmail completedAt createdAt updatedAt')
                 .sort({ order: 1, createdAt: 1 })
                 .lean(),
+            OnboardingInvite.find({ applicationId: { $in: appIds } })
+                .select('applicationId status expiresAt onboardingFormIds requestedDocumentKeys updatedAt')
+                .lean(),
+            getComplianceRequirements(),
         ]);
         const jobTitleById = new Map(jobs.map((j: any) => [String(j._id), j.title]));
+        const reqLabelByKey = new Map((complianceReqs as any[]).map((r) => [r.key, r.label]));
+        const inviteByApp = new Map((invites as any[]).map((iv) => [String(iv.applicationId), iv]));
 
         // Fill in names for records saved before `formName` existed (and for any
         // questionnaire renamed since it was assigned).
@@ -78,6 +96,20 @@ export async function GET(request: Request) {
         let rows = applications.map((app: any) => {
             const packet = responsesByAppId.get(String(app._id)) || [];
             const progress = rollUpOnboarding(packet);
+            const iv = inviteByApp.get(String(app._id));
+            // What the admin explicitly requested the applicant to self-serve.
+            const invite = iv ? {
+                status: iv.status,
+                expiresAt: iv.expiresAt || null,
+                updatedAt: iv.updatedAt,
+                requestedQuestionnaires: packet
+                    .filter((r: any) => r.assignee === 'applicant')
+                    .map((r: any) => formNameById.get(String(r.onboardingFormId)) || r.formName || 'Questionnaire'),
+                requestedDocuments: (iv.requestedDocumentKeys || []).map((k: string) => ({
+                    key: k,
+                    label: reqLabelByKey.get(k) || k,
+                })),
+            } : null;
             return {
                 _id: app._id,
                 applicantName: app.applicantName,
@@ -90,12 +122,14 @@ export async function GET(request: Request) {
                     onboardingFormId: r.onboardingFormId,
                     formName: formNameById.get(String(r.onboardingFormId)) || r.formName || 'Questionnaire',
                     status: r.status,
+                    assignee: r.assignee || 'admin',
                     answeredCount: r.answeredCount || 0,
                     totalCount: r.totalCount || 0,
                     requiredCount: r.requiredCount || 0,
                     completedAt: r.completedAt || null,
                     updatedAt: r.updatedAt,
                 })),
+                invite,
                 progress,
                 onboardingStatus: progress.status,
             };
@@ -131,21 +165,38 @@ export async function POST(request: Request) {
         await dbConnect();
         const body = await request.json();
         const applicationId = (body?.applicationId || '').toString();
+        const staffId = (body?.staffId || '').toString();
         const requestedIds: string[] = Array.isArray(body?.onboardingFormIds)
             ? body.onboardingFormIds.map((v: any) => String(v || '')).filter(Boolean)
             : [(body?.onboardingFormId || '').toString()].filter(Boolean);
         const formIds = Array.from(new Set(requestedIds));
 
-        if (!applicationId || formIds.length === 0) {
-            return NextResponse.json({ error: 'applicationId and at least one onboardingFormId are required' }, { status: 400 });
+        if ((!applicationId && !staffId) || formIds.length === 0) {
+            return NextResponse.json({ error: 'applicationId or staffId, and at least one onboardingFormId, are required' }, { status: 400 });
         }
 
-        const application = await JobApplication.findById(applicationId);
-        if (!application) {
-            return NextResponse.json({ error: 'Application not found' }, { status: 404 });
-        }
-        if (application.status !== 'accepted') {
-            return NextResponse.json({ error: 'Onboarding can only be started for accepted applications.' }, { status: 400 });
+        // Resolve the subject — an accepted APPLICATION (candidate) or a STAFF
+        // member (no application). Both create admin-fill OnboardingResponses; the
+        // fields written differ only by owner.
+        let ownerFilter: Record<string, any>;
+        let create: { applicationId: any; employeeRecordId: any; jobId: any; applicantName: string; applicantEmail: string };
+        if (applicationId) {
+            const application = await JobApplication.findById(applicationId);
+            if (!application) return NextResponse.json({ error: 'Application not found' }, { status: 404 });
+            if (application.status !== 'accepted') {
+                return NextResponse.json({ error: 'Onboarding can only be started for accepted applications.' }, { status: 400 });
+            }
+            const empId = await resolveEmployeeRecordIdByEmail(application.applicantEmail, { name: application.applicantName, applicationId: application._id });
+            ownerFilter = { applicationId };
+            create = { applicationId, employeeRecordId: empId, jobId: application.jobId, applicantName: application.applicantName, applicantEmail: application.applicantEmail };
+        } else {
+            const staff = await Staff.findOne({ staffid: staffId }).select('staffid email full_name firstname lastname').lean();
+            if (!staff) return NextResponse.json({ error: 'Staff member not found' }, { status: 404 });
+            const name = (staff as any).full_name || [(staff as any).firstname, (staff as any).lastname].filter(Boolean).join(' ').trim();
+            const rec = await resolveEmployeeRecordByStaff(staffId, { email: (staff as any).email, name });
+            if (!rec) return NextResponse.json({ error: 'Could not resolve a staff record.' }, { status: 500 });
+            ownerFilter = { employeeRecordId: rec._id };
+            create = { applicationId: null, employeeRecordId: rec._id, jobId: null, applicantName: rec.name || name || '', applicantEmail: rec.email || '' };
         }
 
         const forms = await OnboardingForm.find({ _id: { $in: formIds } }).select('_id name customFields').lean();
@@ -153,13 +204,13 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'One or more onboarding questionnaires were not found' }, { status: 404 });
         }
 
-        const existing = await OnboardingResponse.find({ applicationId }).select('onboardingFormId order').lean();
+        const existing = await OnboardingResponse.find(ownerFilter).select('onboardingFormId order').lean();
         const assignedIds = new Set(existing.map((r: any) => String(r.onboardingFormId)));
         const toCreate = (forms as any[]).filter((f) => !assignedIds.has(String(f._id)));
 
         if (toCreate.length === 0) {
             return NextResponse.json(
-                { error: 'Those questionnaires are already assigned to this candidate.' },
+                { error: 'Those questionnaires are already assigned.' },
                 { status: 409 }
             );
         }
@@ -172,13 +223,14 @@ export async function POST(request: Request) {
             toCreate.map((form: any) => {
                 const fields = Array.isArray(form.customFields) ? form.customFields : [];
                 return {
-                    applicationId,
+                    applicationId: create.applicationId,
+                    employeeRecordId: create.employeeRecordId,
                     onboardingFormId: form._id,
                     formName: form.name || '',
                     order: nextOrder++,
-                    jobId: application.jobId,
-                    applicantName: application.applicantName,
-                    applicantEmail: application.applicantEmail,
+                    jobId: create.jobId,
+                    applicantName: create.applicantName,
+                    applicantEmail: create.applicantEmail,
                     status: 'in_progress',
                     answeredCount: 0,
                     totalCount: fields.length,

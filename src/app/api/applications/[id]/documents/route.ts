@@ -4,6 +4,8 @@ import dbConnect from '@/lib/mongoose';
 import ApplicationDocument, { type DocumentType } from '@/models/ApplicationDocument';
 import JobApplication from '@/models/JobApplication';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { getApplicationDocumentRequirements } from '@/lib/compliance';
+import { resolveEmployeeRecordIdByEmail } from '@/lib/employeeRecord';
 
 interface MultiPartFormData {
   get(key: string): File | string | null;
@@ -70,10 +72,16 @@ export async function POST(
     const cloudinaryData = await uploadRes.json() as any;
     const fileUrl = cloudinaryData.secure_url;
 
-    // Create document record
+    // Create document record. Dual-write the person-centric owner (EmployeeRecord,
+    // Phase 1); best-effort, migration 012 backfills a miss.
     const expiryDate = expiryDateStr ? new Date(expiryDateStr) : null;
+    const employeeRecordId = await resolveEmployeeRecordIdByEmail(application.applicantEmail, {
+      name: application.applicantName,
+      applicationId: appId,
+    });
     const doc = await ApplicationDocument.create({
       applicationId: appId,
+      employeeRecordId,
       documentType,
       fileUrl,
       fileName: file.name,
@@ -118,7 +126,7 @@ export async function GET(
     const { id: appId } = await params;
 
     // Verify access
-    const application = await JobApplication.findById(appId).select('applicantEmail');
+    const application = await JobApplication.findById(appId).select('applicantEmail jobId');
     if (!application) {
       return NextResponse.json({ error: 'Application not found' }, { status: 404 });
     }
@@ -129,15 +137,26 @@ export async function GET(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    // Fetch documents
-    const documents = await ApplicationDocument.find({ applicationId: appId })
-      .select('documentType deliveryMethod fileName fileUrl value expiryDate status uploadedAt rejectionReason')
-      .sort({ uploadedAt: -1 });
+    // Fetch documents + the live requirement catalog so the reviewer can see
+    // which requirements are outstanding (added after this person applied), not
+    // just what was submitted. `requiresFile` is the configured evidenceMode.
+    const [documents, requirements] = await Promise.all([
+      ApplicationDocument.find({ applicationId: appId })
+        .select('documentType deliveryMethod fileName fileUrl value expiryDate status uploadedAt rejectionReason')
+        .sort({ uploadedAt: -1 }),
+      getApplicationDocumentRequirements((application as any).jobId ? String((application as any).jobId) : null),
+    ]);
 
     return NextResponse.json(
       {
         success: true,
         documents,
+        requirements: requirements.map((r) => ({
+          documentType: r.documentType,
+          label: r.label,
+          required: r.required,
+          requiresFile: r.requiresFile,
+        })),
       },
       { status: 200 }
     );

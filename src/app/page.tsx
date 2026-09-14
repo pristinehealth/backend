@@ -92,7 +92,6 @@ export default function LandingPage() {
     };
 
     // Pre-fill the contact form's inquiry type when a CTA funnels here.
-    const requestType = (type: string) => setContact((c) => ({ ...c, inquiryType: type }));
 
     const submitContact = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -189,14 +188,12 @@ export default function LandingPage() {
                     <Link href="/" className="flex items-center gap-2">
                         <img src="/logo.png" alt="Pristine Health" className="h-10 w-auto brightness-110 dark:brightness-100" />
                     </Link>
-                    <nav className="hidden md:flex items-center gap-7 text-sm font-semibold">
-                        <a href="#workforce" className="hover:text-brand-primary transition-colors">Facility Staffing</a>
-                        <a href="#in-home" className="hover:text-brand-primary transition-colors">In-Home Care</a>
-                        <a href="#quality" className="hover:text-brand-primary transition-colors">Quality</a>
-                        <a href="#technology" className="hover:text-brand-primary transition-colors">Technology</a>
+                    <nav className="hidden md:flex items-center gap-6 text-sm font-semibold">
+                        <Link href="/facility-staffing" className="hover:text-brand-primary transition-colors">Facility Staffing</Link>
+                        <Link href="/home-care" className="hover:text-brand-primary transition-colors">Home Care</Link>
+                        <Link href="/locations" className="hover:text-brand-primary transition-colors">Service Areas</Link>
+                        <Link href="/jobs" className="hover:text-brand-primary transition-colors">Careers</Link>
                         <a href="#contact" className="hover:text-brand-primary transition-colors">Contact</a>
-                        <Link href="/jobs" className="hover:text-brand-primary transition-colors">Open Positions</Link>
-                        <Link href="/jobs/track" className="hover:text-brand-primary transition-colors">Track Application</Link>
                     </nav>
                     <div className="flex items-center gap-3">
                         <button onClick={toggleTheme} className="p-2 rounded-xl text-slate-500 hover:bg-slate-200/50 dark:hover:bg-white/[0.05] transition-all" title="Toggle theme">
@@ -237,12 +234,12 @@ export default function LandingPage() {
                             Better access. Smarter coordination. Reliable support.
                         </p>
                         <div className="flex flex-wrap gap-4 pt-2">
-                            <a href="#contact" onClick={() => requestType("Facility Staffing")} className="bg-brand-primary hover:bg-brand-primary-dark text-white font-bold px-7 py-3.5 rounded-xl shadow-lg shadow-brand-primary/30 flex items-center gap-2 active:scale-95 transition-all">
+                            <Link href="/request-staffing" className="bg-brand-primary hover:bg-brand-primary-dark text-white font-bold px-7 py-3.5 rounded-xl shadow-lg shadow-brand-primary/30 flex items-center gap-2 active:scale-95 transition-all">
                                 Request Staffing <ArrowRight className="h-5 w-5" />
-                            </a>
-                            <a href="#in-home" className="bg-white/10 hover:bg-white/20 border border-white/25 text-white font-bold px-7 py-3.5 rounded-xl backdrop-blur flex items-center gap-2 active:scale-95 transition-all">
-                                <Home className="h-5 w-5" /> Explore In-Home Care
-                            </a>
+                            </Link>
+                            <Link href="/request-home-care" className="bg-white/10 hover:bg-white/20 border border-white/25 text-white font-bold px-7 py-3.5 rounded-xl backdrop-blur flex items-center gap-2 active:scale-95 transition-all">
+                                <Home className="h-5 w-5" /> Request Home Care
+                            </Link>
                         </div>
                         <div className="flex flex-wrap gap-x-8 gap-y-3 pt-6 text-sm text-zinc-300">
                             <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-brand-primary" /> Credentialed & compliant</span>
@@ -299,9 +296,9 @@ export default function LandingPage() {
                 </Reveal>
 
                 <Reveal className="mt-8" delay={150}>
-                    <a href="#contact" onClick={() => requestType("Facility Staffing")} className="inline-flex items-center gap-2 bg-brand-primary hover:bg-brand-primary-dark text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-brand-primary/20 active:scale-95 transition-all">
+                    <Link href="/request-staffing" className="inline-flex items-center gap-2 bg-brand-primary hover:bg-brand-primary-dark text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-brand-primary/20 active:scale-95 transition-all">
                         Find Staffing Solutions <ArrowRight className="h-4 w-4" />
-                    </a>
+                    </Link>
                 </Reveal>
             </section>
 
@@ -336,9 +333,9 @@ export default function LandingPage() {
                         <p className="text-sm text-text-secondary leading-relaxed max-w-2xl">
                             We also support individuals living in apartments within retirement, assisted living, long-term care, memory care, rehabilitation, and nursing environments.
                         </p>
-                        <a href="#contact" onClick={() => requestType("In-Home Care")} className="shrink-0 inline-flex items-center gap-2 bg-brand-accent hover:bg-brand-accent-dark text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-brand-accent/20 active:scale-95 transition-all">
+                        <Link href="/request-home-care" className="shrink-0 inline-flex items-center gap-2 bg-brand-accent hover:bg-brand-accent-dark text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-brand-accent/20 active:scale-95 transition-all">
                             Explore Care Options <ArrowRight className="h-4 w-4" />
-                        </a>
+                        </Link>
                     </Reveal>
                 </div>
             </section>
@@ -431,12 +428,12 @@ export default function LandingPage() {
                         Whether you are filling an urgent shift, building reliable workforce capacity, or arranging personalized in-home care, Pristine Health helps you move forward with confidence.
                     </p>
                     <div className="flex flex-wrap justify-center gap-4 pt-2">
-                        <a href="#contact" onClick={() => requestType("Facility Staffing")} className="bg-brand-primary hover:bg-brand-primary-dark text-white font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-brand-primary/30 flex items-center gap-2 active:scale-95 transition-all">
+                        <Link href="/request-staffing" className="bg-brand-primary hover:bg-brand-primary-dark text-white font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-brand-primary/30 flex items-center gap-2 active:scale-95 transition-all">
                             Request Staffing <ArrowRight className="h-4 w-4" />
-                        </a>
-                        <a href="#contact" onClick={() => requestType("In-Home Care")} className="bg-white text-brand-accent hover:bg-zinc-100 font-bold px-6 py-3.5 rounded-xl flex items-center gap-2 active:scale-95 transition-all">
+                        </Link>
+                        <Link href="/request-home-care" className="bg-white text-brand-accent hover:bg-zinc-100 font-bold px-6 py-3.5 rounded-xl flex items-center gap-2 active:scale-95 transition-all">
                             <Home className="h-4 w-4" /> Get In-Home Care
-                        </a>
+                        </Link>
                         <Link href="/jobs" className="bg-white/10 hover:bg-white/20 border border-white/30 text-white font-bold px-6 py-3.5 rounded-xl backdrop-blur flex items-center gap-2 active:scale-95 transition-all">
                             Find Opportunities <ArrowRight className="h-4 w-4" />
                         </Link>
@@ -554,9 +551,9 @@ export default function LandingPage() {
                     <div className="space-y-3">
                         <h4 className="text-white font-bold text-sm">Solutions</h4>
                         <ul className="space-y-2 text-xs">
-                            <li><a href="#workforce" className="hover:text-white transition-colors">Facility Staffing</a></li>
-                            <li><a href="#in-home" className="hover:text-white transition-colors">In-Home Care</a></li>
-                            <li><a href="#technology" className="hover:text-white transition-colors">Technology</a></li>
+                            <li><Link href="/facility-staffing" className="hover:text-white transition-colors">Facility Staffing</Link></li>
+                            <li><Link href="/home-care" className="hover:text-white transition-colors">Home Care</Link></li>
+                            <li><Link href="/locations" className="hover:text-white transition-colors">Service Areas</Link></li>
                         </ul>
                     </div>
                     <div className="space-y-3">

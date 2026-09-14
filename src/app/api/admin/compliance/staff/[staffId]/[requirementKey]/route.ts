@@ -49,7 +49,8 @@ export async function POST(
       action?: Action;
       reason?: string;
       expiryDate?: string | null;
-      evidence?: { fileUrl?: string; fileName?: string; reference?: string; deliveryMethod?: string; source?: string; publicId?: string };
+      markVerified?: boolean;
+      evidence?: { fileUrl?: string; fileName?: string; reference?: string; deliveryMethod?: string; source?: string; publicId?: string; markVerified?: boolean };
     };
     const action = body.action;
     const now = new Date();
@@ -248,11 +249,20 @@ export async function POST(
             { $set: { status: 'consumed', consumedAt: now, usageType: 'supporting_document' } }
           );
         }
-        if (record.status === 'missing' || record.status === 'rejected') {
-          record.status = 'pending';
-        }
         record.rejectionReason = null;
         events.push({ eventType: 'evidence_added', payload: { hasFile } });
+        // One-step upload+verify: an admin manually attaching a document they've
+        // received can mark it verified in the same action (no second click).
+        if (ev.markVerified === true || body.markVerified === true) {
+          record.status = 'verified';
+          record.verifiedAt = now;
+          record.verifiedBy = actor;
+          if (body.expiryDate) record.expiryDate = new Date(body.expiryDate);
+          if (record.expiryDate && isExpiryElapsed(record.expiryDate, now)) record.status = 'expired';
+          events.push({ eventType: 'verified', payload: { expiryDate: record.expiryDate, via: 'admin_upload' } });
+        } else if (record.status === 'missing' || record.status === 'rejected') {
+          record.status = 'pending';
+        }
         break;
       }
       default:

@@ -11,6 +11,7 @@ import { getApplicationDocumentRequirements } from '@/lib/compliance';
 import { resolveFileReference } from '@/lib/uploadResolve';
 import { sendNewApplicationAdminEmail, sendApplicationReceivedEmail } from '@/lib/mailer';
 import { createApplicationAccessLinkToken } from '@/lib/applicationAccess';
+import { resolveEmployeeRecordIdByEmail } from '@/lib/employeeRecord';
 import Settings from '@/models/Settings';
 
 export const dynamic = 'force-dynamic';
@@ -169,6 +170,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             termsAgreedAt: new Date(),
         });
 
+        // Dual-write the person-centric owner (EmployeeRecord, Phase 1). Best-effort:
+        // resolve-or-create by email, stamp the application, and tag its documents.
+        // Never blocks submit — migration 012 backfills any miss.
+        const employeeRecordId = await resolveEmployeeRecordIdByEmail(applicantEmail, {
+            name: normalizedApplicantName,
+            applicationId: application._id,
+        });
+        if (employeeRecordId) {
+            await JobApplication.updateOne({ _id: application._id }, { $set: { employeeRecordId } }).catch(() => {});
+        }
+
         const normalizedDocs = (await Promise.all(submittedDocs
             .filter((doc) => doc && doc.documentType)
             .map(async (doc) => {
@@ -181,6 +193,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
                     const fileUrl = await resolveFileReference(doc.publicId || doc.fileUrl);
                     return {
                         applicationId: application._id,
+                        employeeRecordId,
                         documentType: doc.documentType as DocumentType,
                         deliveryMethod: doc.deliveryMethod === 'email' ? 'email' : 'upload',
                         fileUrl,
@@ -198,6 +211,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
                 if (!value) return null;
                 return {
                     applicationId: application._id,
+                    employeeRecordId,
                     documentType: doc.documentType as DocumentType,
                     deliveryMethod: 'email' as const,
                     fileUrl: '',

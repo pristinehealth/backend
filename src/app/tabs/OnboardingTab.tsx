@@ -3,9 +3,15 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
     Loader2, Plus, Trash2, X, Search, ClipboardList, UserCheck, Eye, CheckCircle2, Edit, ChevronLeft, ChevronRight, FileText, Download,
-    GripVertical, ChevronUp, ChevronDown, RotateCcw,
+    GripVertical, ChevronUp, ChevronDown, RotateCcw, Send,
 } from "lucide-react";
 import { resolveFieldType, toDateInputValue } from "@/lib/formFields";
+import { RequestOnboardingModal } from "./onboarding/RequestOnboardingModal";
+import { StaffOnboardingModal } from "./onboarding/StaffOnboardingModal";
+import { DescriptionEditorModal } from "@/components/DescriptionEditorModal";
+import { FormsLibraryManager } from "./onboarding/FormsLibraryManager";
+import { CandidateOnboardingDetail } from "./onboarding/CandidateOnboardingDetail";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { downloadOnboardingPdf, toOnboardingPdfData } from "@/lib/pdf/onboarding";
 
 type FieldType = 'text' | 'paragraph' | 'number' | 'select' | 'checkbox' | 'file' | 'date';
@@ -17,6 +23,7 @@ interface CustomField {
     required: boolean;
     options?: string[];
     section?: string;
+    description?: string;
 }
 
 interface OnboardingForm {
@@ -33,11 +40,21 @@ interface PacketItem {
     onboardingFormId: string;
     formName: string;
     status: 'in_progress' | 'completed';
+    assignee?: 'admin' | 'applicant';
     answeredCount: number;
     totalCount: number;
     requiredCount: number;
     completedAt: string | null;
     updatedAt: string;
+}
+
+// What the admin requested the applicant to self-serve (if a link was sent).
+interface InviteSummary {
+    status: 'active' | 'completed' | 'revoked' | 'expired';
+    expiresAt: string | null;
+    updatedAt: string;
+    requestedQuestionnaires: string[];
+    requestedDocuments: Array<{ key: string; label: string }>;
 }
 
 interface OnboardingRow {
@@ -52,6 +69,20 @@ interface OnboardingRow {
     onboardingStatus: OnboardingStatus;
     progress: { status: OnboardingStatus; done: number; total: number; answered: number; answerable: number; percent: number };
     onboarding: PacketItem[];
+    invite?: InviteSummary | null;
+}
+
+// A staff-onboarding entry — an existing staff member (no application) invited to
+// onboard. Keyed on their EmployeeRecord instead of an application.
+interface StaffOnboardingRow {
+    staffId: string;
+    recordId: string | null;
+    applicantName: string;
+    applicantEmail: string;
+    onboardingStatus: OnboardingStatus;
+    progress: OnboardingRow['progress'];
+    onboarding: PacketItem[];
+    invite?: InviteSummary | null;
 }
 
 const DEFAULT_SECTION = 'Onboarding questions';
@@ -75,7 +106,10 @@ const FIELD_TYPE_OPTIONS: { value: FieldType; label: string }[] = [
 ];
 
 export function OnboardingTab() {
-    const [subTab, setSubTab] = useState<'candidates' | 'questionnaires'>('candidates');
+    const [subTab, setSubTab] = useState<'candidates' | 'staff' | 'questionnaires' | 'library'>('candidates');
+    // Candidate the admin is composing an onboarding request for.
+    const [requestRow, setRequestRow] = useState<OnboardingRow | null>(null);
+    const [showStaffOnboard, setShowStaffOnboard] = useState(false);
     const [alert, setAlert] = useState<{ title: string; message: string } | null>(null);
 
     // ── Questionnaires (builder) ──────────────────────────────────────────
@@ -85,6 +119,8 @@ export function OnboardingTab() {
     const [editingFormId, setEditingFormId] = useState<string | null>(null);
     const [formName, setFormName] = useState("");
     const [formFields, setFormFields] = useState<CustomField[]>([]);
+    // Index of the question whose description is being edited in the modal.
+    const [descEditIndex, setDescEditIndex] = useState<number | null>(null);
     const [fieldName, setFieldName] = useState("");
     const [fieldLabel, setFieldLabel] = useState("");
     const [fieldType, setFieldType] = useState<FieldType>('text');
@@ -100,6 +136,8 @@ export function OnboardingTab() {
 
     // ── Candidates list ───────────────────────────────────────────────────
     const [rows, setRows] = useState<OnboardingRow[]>([]);
+    const [confirmRemove, setConfirmRemove] = useState<{ item: PacketItem; applicantName: string } | null>(null);
+    const [detailRow, setDetailRow] = useState<OnboardingRow | null>(null);
     const [loadingRows, setLoadingRows] = useState(true);
     const [statusFilter, setStatusFilter] = useState<'' | OnboardingStatus>('');
     const [jobFilter, setJobFilter] = useState("");
@@ -109,9 +147,26 @@ export function OnboardingTab() {
     const [jobOptions, setJobOptions] = useState<{ _id: string; title: string }[]>([]);
     const pageSize = 20;
 
+    // ── Staff onboarding list ─────────────────────────────────────────────
+    const [staffRows, setStaffRows] = useState<StaffOnboardingRow[]>([]);
+    const [loadingStaff, setLoadingStaff] = useState(false);
+    const [staffStatusFilter, setStaffStatusFilter] = useState<'' | OnboardingStatus>('');
+    const [staffQ, setStaffQ] = useState('');
+    const [staffPage, setStaffPage] = useState(1);
+    const [staffTotal, setStaffTotal] = useState(0);
+    const [expandedStaff, setExpandedStaff] = useState<Record<string, boolean>>({});
+    // staffId to preselect when opening the onboard/manage modal (null = new).
+    const [manageStaffId, setManageStaffId] = useState<string | null>(null);
+    // Staff parity: View detail + Add-questionnaires targets (mirror candidates).
+    const [detailStaffRow, setDetailStaffRow] = useState<StaffOnboardingRow | null>(null);
+    const [startStaffRow, setStartStaffRow] = useState<StaffOnboardingRow | null>(null);
+
     // ── Assign-questionnaires modal ───────────────────────────────────────
     const [startRow, setStartRow] = useState<OnboardingRow | null>(null);
     const [pickFormIds, setPickFormIds] = useState<string[]>([]);
+    // "Add onboarding elements" also supports document requirements now.
+    const [pickDocKeys, setPickDocKeys] = useState<string[]>([]);
+    const [assignReqs, setAssignReqs] = useState<{ key: string; label: string; evidenceMode?: string }[]>([]);
     const [starting, setStarting] = useState(false);
     // Candidate rows whose packet is expanded, keyed by application id.
     const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
@@ -173,11 +228,49 @@ export function OnboardingTab() {
         }
     };
 
+    const fetchStaffRows = async () => {
+        setLoadingStaff(true);
+        try {
+            const params = new URLSearchParams();
+            if (staffStatusFilter) params.set('onboardingStatus', staffStatusFilter);
+            if (staffQ.trim()) params.set('q', staffQ.trim());
+            params.set('page', String(staffPage));
+            const res = await fetch(`/api/admin/onboarding/staff?${params.toString()}`);
+            const data = await res.json();
+            setStaffRows(Array.isArray(data?.data) ? data.data : []);
+            setStaffTotal(typeof data?.total === 'number' ? data.total : 0);
+        } catch {
+            setStaffRows([]);
+            setStaffTotal(0);
+        } finally {
+            setLoadingStaff(false);
+        }
+    };
+
+    // Refetch whichever list is showing — so editor/remove/assign from a staff row
+    // refresh the staff list, and from a candidate row refresh candidates.
+    const refetchCurrent = () => { if (subTab === 'staff') void fetchStaffRows(); else void fetchRows(); };
+
     useEffect(() => { void fetchForms(); void fetchJobs(); }, []);
+    // Compliance catalog for the "Add onboarding elements" modal's Documents section.
+    useEffect(() => {
+        (async () => {
+            try {
+                const r = await fetch('/api/admin/compliance/requirements');
+                const d = await r.json();
+                const active = (Array.isArray(d?.requirements) ? d.requirements : []).filter((x: any) => x.active !== false);
+                setAssignReqs(active.map((x: any) => ({ key: x.key, label: x.label, evidenceMode: x.evidenceMode })));
+            } catch { /* ignore */ }
+        })();
+    }, []);
     useEffect(() => {
         if (subTab === 'candidates') void fetchRows();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [subTab, statusFilter, jobFilter, page]);
+    useEffect(() => {
+        if (subTab === 'staff') void fetchStaffRows();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [subTab, staffStatusFilter, staffPage]);
 
     // Debounced search
     useEffect(() => {
@@ -186,6 +279,12 @@ export function OnboardingTab() {
         return () => clearTimeout(t);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [q]);
+    useEffect(() => {
+        if (subTab !== 'staff') return;
+        const t = setTimeout(() => { setStaffPage(1); void fetchStaffRows(); }, 350);
+        return () => clearTimeout(t);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [staffQ]);
 
     useEffect(() => {
         if (!viewerFile) return;
@@ -308,41 +407,53 @@ export function OnboardingTab() {
     // afterwards only makes sense for a single pick — with several assigned the
     // admin chooses which to fill in from the expanded packet.
     const handleAssignQuestionnaires = async () => {
-        if (!startRow || pickFormIds.length === 0) return;
+        // Add onboarding elements — questionnaires and/or document requirements — for
+        // a candidate (startRow, by applicationId) or a staff member (startStaffRow,
+        // by staffId — the endpoint resolves/creates the record).
+        const subject = startRow ? { applicationId: startRow._id } : startStaffRow ? { staffId: startStaffRow.staffId } : null;
+        if (!subject || (pickFormIds.length === 0 && pickDocKeys.length === 0)) return;
         setStarting(true);
         try {
-            const res = await fetch('/api/admin/onboarding', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ applicationId: startRow._id, onboardingFormIds: pickFormIds }),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                setAlert({ title: 'Could not assign', message: data?.error || 'Failed to assign questionnaires.' });
-                return;
+            let firstResponseId: string | null = null;
+            if (pickFormIds.length > 0) {
+                const res = await fetch('/api/admin/onboarding', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...subject, onboardingFormIds: pickFormIds }),
+                });
+                const data = await res.json();
+                if (!res.ok) { setAlert({ title: 'Could not add questionnaires', message: data?.error || 'Failed to add questionnaires.' }); return; }
+                if (pickFormIds.length === 1 && Array.isArray(data?.data) && data.data[0]?._id) firstResponseId = String(data.data[0]._id);
             }
-            const applicationId = startRow._id;
-            const single = pickFormIds.length === 1;
+            if (pickDocKeys.length > 0) {
+                const res = await fetch('/api/admin/onboarding/document-requirements', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...subject, documentKeys: pickDocKeys }),
+                });
+                const data = await res.json();
+                if (!res.ok) { setAlert({ title: 'Could not add documents', message: data?.error || 'Failed to add documents.' }); return; }
+            }
+            if (startRow) setExpandedRows((prev) => ({ ...prev, [startRow._id]: true }));
+            if (startStaffRow) setExpandedStaff((prev) => ({ ...prev, [startStaffRow.staffId]: true }));
             setStartRow(null);
+            setStartStaffRow(null);
             setPickFormIds([]);
-            setExpandedRows((prev) => ({ ...prev, [applicationId]: true }));
-            await fetchRows();
-            if (single && Array.isArray(data?.data) && data.data[0]?._id) void openEditor(String(data.data[0]._id));
+            setPickDocKeys([]);
+            refetchCurrent();
+            // Only jump into the editor when a single questionnaire (and no docs) was added.
+            if (firstResponseId && pickDocKeys.length === 0) void openEditor(firstResponseId);
         } finally {
             setStarting(false);
         }
     };
 
     // Unassigns one questionnaire from a candidate's packet, discarding whatever
-    // answers it holds. The other questionnaires are untouched.
-    const handleRemoveQuestionnaire = async (item: PacketItem, row: OnboardingRow) => {
-        const answered = item.answeredCount > 0;
-        const confirmed = window.confirm(
-            answered
-                ? `Remove "${item.formName}" from ${row.applicantName}'s onboarding? ${item.answeredCount} saved answer${item.answeredCount === 1 ? '' : 's'} will be deleted.`
-                : `Remove "${item.formName}" from ${row.applicantName}'s onboarding?`
-        );
-        if (!confirmed) return;
+    // answers it holds. The other questionnaires are untouched. Confirmed via the
+    // in-app ConfirmDialog (see `confirmRemove` state).
+    const doRemoveQuestionnaire = async () => {
+        if (!confirmRemove) return;
+        const { item } = confirmRemove;
         setRemovingId(item._id);
         try {
             const res = await fetch(`/api/admin/onboarding/${item._id}`, { method: 'DELETE' });
@@ -351,9 +462,10 @@ export function OnboardingTab() {
                 setAlert({ title: 'Could not remove', message: data?.error || 'Failed to remove questionnaire.' });
                 return;
             }
-            await fetchRows();
+            refetchCurrent();
         } finally {
             setRemovingId(null);
+            setConfirmRemove(null);
         }
     };
 
@@ -430,7 +542,7 @@ export function OnboardingTab() {
             if (nextStatus) setEditorMeta((m) => ({ ...m, status: nextStatus }));
             // Completing closes the editor; reopening keeps it open to edit.
             if (nextStatus === 'completed') setEditorId(null);
-            await fetchRows();
+            refetchCurrent();
         } finally {
             setSavingAnswers(false);
         }
@@ -505,18 +617,80 @@ export function OnboardingTab() {
         return <input type="text" value={val || ''} onChange={(e) => set(e.target.value)} className="ui-input w-full text-sm" />;
     };
 
+    // Shared file-preview overlay (used by the answer editor and the detail view).
+    const fileViewer = viewerFile ? (() => {
+        const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(viewerFile.name || '');
+        return (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm" onClick={() => setViewerFile(null)}>
+                <div className="w-full max-w-4xl h-[85vh] rounded-2xl border border-border-modal bg-surface-modal shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border-modal">
+                        <div className="flex items-center gap-2 min-w-0"><FileText className="h-4 w-4 text-brand-primary shrink-0" /><p className="text-sm font-bold text-text-primary truncate">{viewerFile.name}</p></div>
+                        <div className="flex items-center gap-1 shrink-0">
+                            <a href={viewerFile.url} download className="p-2 rounded-lg text-text-secondary hover:bg-white/[0.06]" title="Download"><Download className="h-4 w-4" /></a>
+                            <button onClick={() => setViewerFile(null)} className="p-2 rounded-lg text-text-secondary hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
+                        </div>
+                    </div>
+                    <div className="flex-1 bg-slate-100 dark:bg-black/40 overflow-auto flex items-center justify-center">
+                        {isImage ? <img src={viewerFile.url} alt={viewerFile.name} className="max-w-full max-h-full object-contain" /> : <iframe src={viewerFile.url} title={viewerFile.name} className="w-full h-full border-0" />}
+                    </div>
+                </div>
+            </div>
+        );
+    })() : null;
+
+    // Detail view takes over the tab's content area, so the dashboard shell (left
+    // menu) stays visible. The file viewer is still available on top.
+    if (detailRow) {
+        return (
+            <div className="space-y-6">
+                <CandidateOnboardingDetail
+                    applicationId={detailRow._id}
+                    applicantName={detailRow.applicantName}
+                    jobTitle={detailRow.jobTitle}
+                    packet={detailRow.onboarding.map((p) => ({ _id: p._id, formName: p.formName, status: p.status }))}
+                    requestedDocuments={detailRow.invite?.requestedDocuments || []}
+                    onClose={() => setDetailRow(null)}
+                    onViewFile={(url, name) => setViewerFile({ url, name })}
+                />
+                {fileViewer}
+            </div>
+        );
+    }
+
+    // Staff submission review — same component, documents keyed by the record.
+    if (detailStaffRow) {
+        return (
+            <div className="space-y-6">
+                <CandidateOnboardingDetail
+                    applicationId={detailStaffRow.recordId || detailStaffRow.staffId}
+                    applicantName={detailStaffRow.applicantName}
+                    jobTitle="Staff onboarding"
+                    packet={detailStaffRow.onboarding.map((p) => ({ _id: p._id, formName: p.formName, status: p.status }))}
+                    requestedDocuments={detailStaffRow.invite?.requestedDocuments || []}
+                    documentsUrl={detailStaffRow.recordId ? `/api/admin/onboarding/staff/${detailStaffRow.recordId}/documents` : undefined}
+                    employeeRecordId={detailStaffRow.recordId || undefined}
+                    onClose={() => setDetailStaffRow(null)}
+                    onViewFile={(url, name) => setViewerFile({ url, name })}
+                />
+                {fileViewer}
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6">
             <div>
                 <h2 className="text-2xl font-black text-text-primary tracking-tight">Onboarding</h2>
-                <p className="text-sm text-text-muted mt-1">Build onboarding questionnaires and complete them for accepted candidates.</p>
+                <p className="text-sm text-text-muted mt-1">Build onboarding questionnaires and complete them for accepted candidates and staff.</p>
             </div>
 
             {/* Sub-tabs */}
             <div className="flex items-center gap-2">
                 {([
                     { id: 'candidates' as const, label: 'Candidates', icon: UserCheck },
+                    { id: 'staff' as const, label: 'Staff', icon: UserCheck },
                     { id: 'questionnaires' as const, label: 'Questionnaires', icon: ClipboardList },
+                    { id: 'library' as const, label: 'Downloadable Forms', icon: Download },
                 ]).map((t) => {
                     const Icon = t.icon;
                     return (
@@ -567,7 +741,8 @@ export function OnboardingTab() {
                         ) : rows.length === 0 ? (
                             <div className="text-center py-16 text-sm text-text-muted">No accepted candidates match these filters.</div>
                         ) : (
-                            <table className="w-full text-sm">
+                            <div className="overflow-x-auto">
+                            <table className="w-full min-w-[720px] text-sm">
                                 <thead>
                                     <tr className="text-[10px] uppercase tracking-wider text-text-muted border-b border-border-card">
                                         <th className="text-left font-bold px-4 py-3">Candidate</th>
@@ -609,11 +784,16 @@ export function OnboardingTab() {
                                                 <td className="px-4 py-3 text-text-muted text-xs">{new Date(row.acceptedAt).toLocaleDateString()}</td>
                                                 <td className="px-4 py-3">
                                                     <div className="space-y-1.5 min-w-[150px]">
-                                                        <div className="flex items-center gap-2">
+                                                        <div className="flex items-center gap-2 flex-wrap">
                                                             <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${meta.cls}`}>{meta.label}</span>
                                                             {packet.length > 0 && (
                                                                 <span className="text-[11px] font-bold text-text-muted">
                                                                     {progress.done}/{progress.total} questionnaire{progress.total === 1 ? '' : 's'}
+                                                                </span>
+                                                            )}
+                                                            {row.invite && (row.invite.requestedQuestionnaires.length > 0 || row.invite.requestedDocuments.length > 0) && (
+                                                                <span title={`Applicant link ${row.invite.status}`} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${row.invite.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : row.invite.status === 'revoked' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'ui-card-soft text-text-secondary border-border-card'}`}>
+                                                                    <Send className="h-2.5 w-2.5" /> Link {row.invite.status}
                                                                 </span>
                                                             )}
                                                         </div>
@@ -631,12 +811,30 @@ export function OnboardingTab() {
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3 text-right">
-                                                    <button
-                                                        onClick={() => { setStartRow(row); setPickFormIds([]); }}
-                                                        className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg ${packet.length > 0 ? 'ui-card-soft text-text-secondary hover:text-text-primary' : 'bg-brand-primary text-white hover:bg-brand-primary-dark'}`}
-                                                    >
-                                                        <Plus className="h-3.5 w-3.5" /> {packet.length > 0 ? 'Add questionnaire' : 'Start onboarding'}
-                                                    </button>
+                                                    <div className="inline-flex items-center gap-2">
+                                                        {packet.length > 0 && (
+                                                            <button
+                                                                onClick={() => setDetailRow(row)}
+                                                                title="View submitted answers and documents"
+                                                                className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg ui-card-soft text-text-secondary hover:text-text-primary"
+                                                            >
+                                                                <Eye className="h-3.5 w-3.5" /> View
+                                                            </button>
+                                                        )}
+                                                        <button
+                                                            onClick={() => setRequestRow(row)}
+                                                            title="Request the applicant to fill questionnaires / upload documents via a secure link"
+                                                            className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border border-brand-primary/30 text-brand-primary hover:bg-brand-primary/10"
+                                                        >
+                                                            <Send className="h-3.5 w-3.5" /> Request
+                                                        </button>
+                                                        <button
+                                                            onClick={() => { setStartRow(row); setPickFormIds([]); setPickDocKeys([]); }}
+                                                            className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg ${packet.length > 0 ? 'ui-card-soft text-text-secondary hover:text-text-primary' : 'bg-brand-primary text-white hover:bg-brand-primary-dark'}`}
+                                                        >
+                                                            <Plus className="h-3.5 w-3.5" /> {packet.length > 0 ? 'Add' : 'Start'}
+                                                        </button>
+                                                    </div>
                                                 </td>
                                             </tr>
                                             {expanded && packet.map((item) => {
@@ -666,7 +864,7 @@ export function OnboardingTab() {
                                                                 <Edit className="h-3.5 w-3.5" /> Open
                                                             </button>
                                                             <button
-                                                                onClick={() => handleRemoveQuestionnaire(item, row)}
+                                                                onClick={() => setConfirmRemove({ item, applicantName: row.applicantName })}
                                                                 disabled={removingId === item._id}
                                                                 title="Remove this questionnaire from the candidate"
                                                                 aria-label={`Remove ${item.formName}`}
@@ -678,11 +876,39 @@ export function OnboardingTab() {
                                                     </tr>
                                                 );
                                             })}
+                                            {expanded && row.invite && (row.invite.requestedQuestionnaires.length > 0 || row.invite.requestedDocuments.length > 0) && (
+                                                <tr className="border-b last:border-0 border-border-card bg-brand-primary-muted/30">
+                                                    <td className="px-4 py-3 pl-12" colSpan={5}>
+                                                        <div className="space-y-1.5">
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <Send className="h-3.5 w-3.5 text-brand-primary" />
+                                                                <span className="text-[11px] font-black uppercase tracking-wider text-brand-primary">Requested from applicant</span>
+                                                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${row.invite.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : row.invite.status === 'revoked' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'ui-card-soft text-text-secondary border-border-card'}`}>
+                                                                    Link {row.invite.status}
+                                                                </span>
+                                                                {row.invite.expiresAt && row.invite.status === 'active' && (
+                                                                    <span className="text-[10px] text-text-muted">expires {new Date(row.invite.expiresAt).toLocaleDateString()}</span>
+                                                                )}
+                                                            </div>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {row.invite.requestedQuestionnaires.map((name, i) => (
+                                                                    <span key={`q-${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-primary-muted text-brand-primary border border-brand-primary/15"><ClipboardList className="h-3 w-3" /> {name}</span>
+                                                                ))}
+                                                                {row.invite.requestedDocuments.map((d) => (
+                                                                    <span key={`d-${d.key}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20"><FileText className="h-3 w-3" /> {d.label}</span>
+                                                                ))}
+                                                            </div>
+                                                            <button onClick={() => setRequestRow(row)} className="text-[11px] font-bold text-brand-primary hover:text-brand-primary-dark">Manage request →</button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
                                             </Fragment>
                                         );
                                     })}
                                 </tbody>
                             </table>
+                            </div>
                         )}
                     </div>
 
@@ -691,6 +917,185 @@ export function OnboardingTab() {
                             <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="p-2 rounded-lg ui-card-soft disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
                             <span className="text-xs font-bold text-text-muted">Page {page} / {totalPages}</span>
                             <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-2 rounded-lg ui-card-soft disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* ── Staff onboarding ───────────────────────────────────────── */}
+            {subTab === 'staff' && (
+                <div className="space-y-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-1">
+                            {([
+                                { v: '' as const, label: 'All' },
+                                { v: 'not_started' as const, label: 'Not started' },
+                                { v: 'in_progress' as const, label: 'In progress' },
+                                { v: 'completed' as const, label: 'Completed' },
+                            ]).map((s) => (
+                                <button
+                                    key={s.label}
+                                    onClick={() => { setStaffStatusFilter(s.v); setStaffPage(1); }}
+                                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${staffStatusFilter === s.v ? 'bg-brand-primary text-white border-brand-primary' : 'ui-card-soft text-text-secondary'}`}
+                                >
+                                    {s.label}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="relative flex-1 min-w-[180px] max-w-xs">
+                            <Search className="h-4 w-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input value={staffQ} onChange={(e) => setStaffQ(e.target.value)} placeholder="Search name, email, or staff ID" className="ui-input w-full text-xs pl-9" />
+                        </div>
+                    </div>
+
+                    <div className="crm-panel rounded-2xl overflow-hidden">
+                        {loadingStaff ? (
+                            <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-brand-primary" /></div>
+                        ) : staffRows.length === 0 ? (
+                            <div className="text-center py-16 text-sm text-text-muted">No staff match these filters.</div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                            <table className="w-full min-w-[680px] text-sm">
+                                <thead>
+                                    <tr className="text-[10px] uppercase tracking-wider text-text-muted border-b border-border-card">
+                                        <th className="text-left font-bold px-4 py-3">Staff member</th>
+                                        <th className="text-left font-bold px-4 py-3">Onboarding</th>
+                                        <th className="text-right font-bold px-4 py-3">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {staffRows.map((row) => {
+                                        const meta = STATUS_META[row.onboardingStatus];
+                                        const packet = row.onboarding || [];
+                                        const progress = row.progress || { done: 0, total: packet.length, percent: 0, answered: 0, answerable: 0, status: row.onboardingStatus };
+                                        const expanded = !!expandedStaff[row.staffId];
+                                        const hasRequest = !!row.invite && (row.invite.requestedQuestionnaires.length > 0 || row.invite.requestedDocuments.length > 0);
+                                        return (
+                                        <Fragment key={row.staffId}>
+                                        <tr className={`border-b border-border-card ${expanded ? '' : 'last:border-0'}`}>
+                                            <td className="px-4 py-3">
+                                                <div className="flex items-start gap-2">
+                                                    {packet.length > 0 && (
+                                                        <button onClick={() => setExpandedStaff((p) => ({ ...p, [row.staffId]: !p[row.staffId] }))} aria-label="Toggle questionnaires" aria-expanded={expanded} className="mt-0.5 text-text-muted hover:text-text-primary">
+                                                            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                                        </button>
+                                                    )}
+                                                    <div className={packet.length === 0 ? 'pl-6' : ''}>
+                                                        <p className="font-bold text-text-primary">{row.applicantName}</p>
+                                                        <p className="text-[11px] text-text-muted">{row.applicantEmail}{row.staffId ? ` · #${row.staffId}` : ''}</p>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <div className="space-y-1.5 min-w-[150px]">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${meta.cls}`}>{meta.label}</span>
+                                                        {packet.length > 0 && <span className="text-[11px] font-bold text-text-muted">{progress.done}/{progress.total} questionnaire{progress.total === 1 ? '' : 's'}</span>}
+                                                        {row.invite && (
+                                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${row.invite.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : row.invite.status === 'revoked' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'ui-card-soft text-text-secondary border-border-card'}`}>
+                                                                <Send className="h-2.5 w-2.5" /> Link {row.invite.status}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {packet.length > 0 && (
+                                                        <>
+                                                            <div className="h-1.5 w-full rounded-full bg-border-card overflow-hidden max-w-[280px]">
+                                                                <div className={`h-full rounded-full transition-all ${progress.percent === 100 ? 'bg-emerald-500' : 'bg-brand-primary'}`} style={{ width: `${Math.min(100, Math.max(0, progress.percent))}%` }} />
+                                                            </div>
+                                                            <p className="text-[10px] text-text-muted">{progress.answered}/{progress.answerable} questions answered</p>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-3 text-right">
+                                                <div className="inline-flex items-center gap-2">
+                                                    {packet.length > 0 && (
+                                                        <button onClick={() => setDetailStaffRow(row)} title="View submitted answers and documents" className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg ui-card-soft text-text-secondary hover:text-text-primary">
+                                                            <Eye className="h-3.5 w-3.5" /> View
+                                                        </button>
+                                                    )}
+                                                    <button onClick={() => { setManageStaffId(row.staffId); setShowStaffOnboard(true); }} title="Send a secure onboarding link for the staff member to self-serve" className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border border-brand-primary/30 text-brand-primary hover:bg-brand-primary/10">
+                                                        <Send className="h-3.5 w-3.5" /> Request
+                                                    </button>
+                                                    <button onClick={() => { setStartStaffRow(row); setPickFormIds([]); setPickDocKeys([]); }} className={`inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg ${packet.length > 0 ? 'ui-card-soft text-text-secondary hover:text-text-primary' : 'bg-brand-primary text-white hover:bg-brand-primary-dark'}`}>
+                                                        <Plus className="h-3.5 w-3.5" /> {packet.length > 0 ? 'Add' : 'Start'}
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {expanded && packet.map((item) => {
+                                            const itemMeta = STATUS_META[item.status === 'completed' ? 'completed' : 'in_progress'];
+                                            const itemPct = item.status === 'completed' ? 100 : item.totalCount > 0 ? Math.round((item.answeredCount / item.totalCount) * 100) : 0;
+                                            return (
+                                                <tr key={item._id} className="border-b last:border-0 border-border-card bg-surface-card/40">
+                                                    <td className="px-4 py-2.5 pl-12">
+                                                        <p className="text-sm font-semibold text-text-primary">{item.formName}</p>
+                                                        <p className="text-[10px] text-text-muted">{item.answeredCount}/{item.totalCount} answered · {item.requiredCount} required</p>
+                                                    </td>
+                                                    <td className="px-4 py-2.5">
+                                                        <div className="space-y-1.5 min-w-[150px]">
+                                                            <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${itemMeta.cls}`}>{itemMeta.label}</span>
+                                                            <div className="h-1 w-full rounded-full bg-border-card overflow-hidden max-w-[240px]">
+                                                                <div className={`h-full rounded-full ${itemPct === 100 ? 'bg-emerald-500' : 'bg-brand-primary'}`} style={{ width: `${Math.min(100, Math.max(0, itemPct))}%` }} />
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                                                        <button onClick={() => openEditor(item._id)} className="inline-flex items-center gap-1 text-xs font-bold text-brand-primary hover:text-brand-primary-dark">
+                                                            <Edit className="h-3.5 w-3.5" /> Open
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setConfirmRemove({ item, applicantName: row.applicantName })}
+                                                            disabled={removingId === item._id}
+                                                            title={`Remove ${item.formName}`}
+                                                            aria-label={`Remove ${item.formName}`}
+                                                            className="ml-3 text-rose-500 hover:text-rose-400 disabled:opacity-50"
+                                                        >
+                                                            {removingId === item._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                        {expanded && row.invite && (row.invite.requestedQuestionnaires.length > 0 || row.invite.requestedDocuments.length > 0) && (
+                                            <tr className="border-b last:border-0 border-border-card bg-brand-primary-muted/30">
+                                                <td className="px-4 py-3 pl-12" colSpan={3}>
+                                                    <div className="space-y-1.5">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <Send className="h-3.5 w-3.5 text-brand-primary" />
+                                                            <span className="text-[11px] font-black uppercase tracking-wider text-brand-primary">Requested from staff member</span>
+                                                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${row.invite.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : row.invite.status === 'revoked' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' : 'ui-card-soft text-text-secondary border-border-card'}`}>Link {row.invite.status}</span>
+                                                            {row.invite.expiresAt && row.invite.status === 'active' && (
+                                                                <span className="text-[10px] text-text-muted">expires {new Date(row.invite.expiresAt).toLocaleDateString()}</span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {row.invite.requestedQuestionnaires.map((name, i) => (
+                                                                <span key={`q-${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-primary-muted text-brand-primary border border-brand-primary/15"><ClipboardList className="h-3 w-3" /> {name}</span>
+                                                            ))}
+                                                            {row.invite.requestedDocuments.map((d) => (
+                                                                <span key={`d-${d.key}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20"><FileText className="h-3 w-3" /> {d.label}</span>
+                                                            ))}
+                                                        </div>
+                                                        <button onClick={() => { setManageStaffId(row.staffId); setShowStaffOnboard(true); }} className="text-[11px] font-bold text-brand-primary hover:text-brand-primary-dark">Manage request →</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                        </Fragment>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                            </div>
+                        )}
+                    </div>
+
+                    {Math.ceil(staffTotal / pageSize) > 1 && (
+                        <div className="flex justify-center items-center gap-2">
+                            <button onClick={() => setStaffPage((p) => Math.max(1, p - 1))} disabled={staffPage === 1} className="p-2 rounded-lg ui-card-soft disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
+                            <span className="text-xs font-bold text-text-muted">Page {staffPage} / {Math.max(1, Math.ceil(staffTotal / pageSize))}</span>
+                            <button onClick={() => setStaffPage((p) => Math.min(Math.max(1, Math.ceil(staffTotal / pageSize)), p + 1))} disabled={staffPage >= Math.ceil(staffTotal / pageSize)} className="p-2 rounded-lg ui-card-soft disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
                         </div>
                     )}
                 </div>
@@ -731,6 +1136,54 @@ export function OnboardingTab() {
                     )}
                 </div>
             )}
+
+            {/* ── Downloadable Forms library ─────────────────────────────── */}
+            {subTab === 'library' && <FormsLibraryManager />}
+
+            {/* ── Request onboarding modal ───────────────────────────────── */}
+            {requestRow && (
+                <RequestOnboardingModal
+                    applicationId={requestRow._id}
+                    applicantName={requestRow.applicantName}
+                    forms={forms}
+                    onClose={() => setRequestRow(null)}
+                    onChanged={() => void fetchRows()}
+                />
+            )}
+
+            {/* ── Onboard existing staff (no application) ─────────────────── */}
+            {showStaffOnboard && (
+                <StaffOnboardingModal
+                    forms={forms}
+                    preselectStaffId={manageStaffId || undefined}
+                    onClose={() => { setShowStaffOnboard(false); setManageStaffId(null); }}
+                    onChanged={() => { void fetchStaffRows(); }}
+                />
+            )}
+
+            <DescriptionEditorModal
+                open={descEditIndex !== null}
+                initialValue={descEditIndex !== null ? (formFields[descEditIndex]?.description || '') : ''}
+                questionLabel={descEditIndex !== null ? formFields[descEditIndex]?.label : ''}
+                onSave={(v) => { if (descEditIndex !== null) updateField(descEditIndex, { description: v }); }}
+                onClose={() => setDescEditIndex(null)}
+            />
+
+            {/* ── Remove-questionnaire confirmation ──────────────────────── */}
+            <ConfirmDialog
+                open={!!confirmRemove}
+                tone="danger"
+                title="Remove questionnaire?"
+                message={confirmRemove
+                    ? confirmRemove.item.answeredCount > 0
+                        ? `Remove "${confirmRemove.item.formName}" from ${confirmRemove.applicantName}'s onboarding? ${confirmRemove.item.answeredCount} saved answer${confirmRemove.item.answeredCount === 1 ? '' : 's'} will be deleted.`
+                        : `Remove "${confirmRemove.item.formName}" from ${confirmRemove.applicantName}'s onboarding?`
+                    : ''}
+                confirmLabel="Remove"
+                busy={!!confirmRemove && removingId === confirmRemove.item._id}
+                onConfirm={doRemoveQuestionnaire}
+                onClose={() => setConfirmRemove(null)}
+            />
 
             {/* ── Builder modal ──────────────────────────────────────────── */}
             {showFormModal && (
@@ -810,6 +1263,16 @@ export function OnboardingTab() {
                                                     aria-label="Question label"
                                                     className="ui-input w-full text-sm font-bold py-1.5"
                                                 />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setDescEditIndex(i)}
+                                                    aria-label="Edit question description"
+                                                    className="ui-input w-full text-xs py-1.5 text-left hover:border-brand-primary/50 transition-colors"
+                                                >
+                                                    {f.description && f.description.trim()
+                                                        ? <span className="text-text-secondary line-clamp-1">{f.description}</span>
+                                                        : <span className="text-text-muted">+ Add description / help text</span>}
+                                                </button>
                                                 {(f.type === 'select' || f.type === 'checkbox') && (
                                                     <input
                                                         value={(f.options || []).join(', ')}
@@ -879,53 +1342,64 @@ export function OnboardingTab() {
             )}
 
             {/* ── Start-onboarding modal ─────────────────────────────────── */}
-            {startRow && (
-                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setStartRow(null)}>
+            {(startRow || startStaffRow) && (
+                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { setStartRow(null); setStartStaffRow(null); }}>
                     <div className="bg-surface-modal border border-border-modal rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
                         {(() => {
-                            const assignedIds = new Set((startRow.onboarding || []).map((i) => String(i.onboardingFormId)));
+                            const subject = startRow || startStaffRow!;
+                            const assignedIds = new Set((subject.onboarding || []).map((i) => String(i.onboardingFormId)));
                             const available = forms.filter((f) => !assignedIds.has(String(f._id)));
+                            const alreadyDocKeys = new Set((subject.invite?.requestedDocuments || []).map((d: any) => d.key));
+                            const availableDocs = assignReqs.filter((r) => !alreadyDocKeys.has(r.key));
+                            const totalPicked = pickFormIds.length + pickDocKeys.length;
                             return (
                                 <>
-                                    <h3 className="font-black text-text-primary">{assignedIds.size > 0 ? 'Add questionnaires' : 'Start onboarding'}</h3>
+                                    <h3 className="font-black text-text-primary">Add onboarding elements</h3>
                                     <p className="text-xs text-text-secondary">
-                                        Choose one or more questionnaires for <strong>{startRow.applicantName}</strong> ({startRow.jobTitle}).
-                                        {assignedIds.size > 0 && ` ${assignedIds.size} already assigned.`}
+                                        Add questionnaires and/or documents for <strong>{subject.applicantName}</strong>{startRow ? ` (${startRow.jobTitle})` : ''}.
                                     </p>
-                                    <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
-                                        {available.map((f) => {
-                                            const checked = pickFormIds.includes(f._id);
-                                            return (
-                                                <label
-                                                    key={f._id}
-                                                    className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors ${checked ? 'border-brand-primary bg-brand-primary-muted' : 'border-border-card hover:border-brand-primary/40'}`}
-                                                >
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={checked}
-                                                        onChange={(e) => setPickFormIds((prev) => (
-                                                            e.target.checked ? [...prev, f._id] : prev.filter((id) => id !== f._id)
-                                                        ))}
-                                                        className="mt-0.5 h-4 w-4 rounded"
-                                                    />
-                                                    <span className="min-w-0">
-                                                        <span className="block text-sm font-bold text-text-primary">{f.name}</span>
-                                                        <span className="block text-[10px] text-text-muted">{(f.customFields || []).length} question{(f.customFields || []).length === 1 ? '' : 's'}</span>
-                                                    </span>
-                                                </label>
-                                            );
-                                        })}
+
+                                    <div className="max-h-[52vh] overflow-y-auto space-y-4 pr-1">
+                                        <div className="space-y-1.5">
+                                            <p className="text-[10px] font-black uppercase tracking-wider text-text-muted">Questionnaires</p>
+                                            {available.map((f) => {
+                                                const checked = pickFormIds.includes(f._id);
+                                                return (
+                                                    <label key={f._id} className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors ${checked ? 'border-brand-primary bg-brand-primary-muted' : 'border-border-card hover:border-brand-primary/40'}`}>
+                                                        <input type="checkbox" checked={checked} onChange={(e) => setPickFormIds((prev) => (e.target.checked ? [...prev, f._id] : prev.filter((id) => id !== f._id)))} className="mt-0.5 h-4 w-4 rounded" />
+                                                        <span className="min-w-0">
+                                                            <span className="block text-sm font-bold text-text-primary">{f.name}</span>
+                                                            <span className="block text-[10px] text-text-muted">{(f.customFields || []).length} question{(f.customFields || []).length === 1 ? '' : 's'}</span>
+                                                        </span>
+                                                    </label>
+                                                );
+                                            })}
+                                            {forms.length === 0 && <p className="text-[11px] text-amber-500">No questionnaires yet — create one in the Questionnaires tab first.</p>}
+                                            {forms.length > 0 && available.length === 0 && <p className="text-[11px] text-text-muted">All questionnaires already assigned.</p>}
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            <p className="text-[10px] font-black uppercase tracking-wider text-text-muted">Documents</p>
+                                            {availableDocs.map((r) => {
+                                                const checked = pickDocKeys.includes(r.key);
+                                                return (
+                                                    <label key={r.key} className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-colors ${checked ? 'border-brand-primary bg-brand-primary-muted' : 'border-border-card hover:border-brand-primary/40'}`}>
+                                                        <input type="checkbox" checked={checked} onChange={(e) => setPickDocKeys((prev) => (e.target.checked ? [...prev, r.key] : prev.filter((k) => k !== r.key)))} className="h-4 w-4 rounded" />
+                                                        <span className="text-sm text-text-primary">{r.label}</span>
+                                                        <span className="ml-auto text-[9px] font-bold uppercase text-text-muted">{r.evidenceMode === 'metadata_only' ? 'Value' : 'File'}</span>
+                                                    </label>
+                                                );
+                                            })}
+                                            {assignReqs.length === 0 && <p className="text-[11px] text-text-muted">No compliance requirements configured.</p>}
+                                            {assignReqs.length > 0 && availableDocs.length === 0 && <p className="text-[11px] text-text-muted">All documents already added.</p>}
+                                        </div>
                                     </div>
-                                    {forms.length === 0 && <p className="text-[11px] text-amber-500">No questionnaires yet — create one in the Questionnaires tab first.</p>}
-                                    {forms.length > 0 && available.length === 0 && (
-                                        <p className="text-[11px] text-amber-500">Every questionnaire is already assigned to this candidate.</p>
-                                    )}
+
+                                    <p className="text-[10px] text-text-muted">Documents are added as expected items — upload them via <strong>View → Documents</strong>, or send the person a link with <strong>Request</strong>.</p>
                                     <div className="flex justify-end gap-2">
-                                        <button onClick={() => setStartRow(null)} className="px-4 py-2 rounded-xl text-xs font-bold ui-card-soft text-text-secondary">Cancel</button>
-                                        <button onClick={handleAssignQuestionnaires} disabled={pickFormIds.length === 0 || starting} className="px-5 py-2 rounded-xl text-xs font-bold bg-brand-primary text-white hover:bg-brand-primary-dark disabled:opacity-60 inline-flex items-center gap-1.5">
-                                            {starting
-                                                ? <><Loader2 className="h-4 w-4 animate-spin" /> Assigning…</>
-                                                : `Assign${pickFormIds.length > 1 ? ` ${pickFormIds.length}` : ''}`}
+                                        <button onClick={() => { setStartRow(null); setStartStaffRow(null); }} className="px-4 py-2 rounded-xl text-xs font-bold ui-card-soft text-text-secondary">Cancel</button>
+                                        <button onClick={handleAssignQuestionnaires} disabled={totalPicked === 0 || starting} className="px-5 py-2 rounded-xl text-xs font-bold bg-brand-primary text-white hover:bg-brand-primary-dark disabled:opacity-60 inline-flex items-center gap-1.5">
+                                            {starting ? <><Loader2 className="h-4 w-4 animate-spin" /> Adding…</> : `Add${totalPicked > 1 ? ` ${totalPicked}` : ''}`}
                                         </button>
                                     </div>
                                 </>
@@ -995,25 +1469,7 @@ export function OnboardingTab() {
             )}
 
             {/* ── File viewer ────────────────────────────────────────────── */}
-            {viewerFile && (() => {
-                const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(viewerFile.name || '');
-                return (
-                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm" onClick={() => setViewerFile(null)}>
-                        <div className="w-full max-w-4xl h-[85vh] rounded-2xl border border-border-modal bg-surface-modal shadow-2xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border-modal">
-                                <div className="flex items-center gap-2 min-w-0"><FileText className="h-4 w-4 text-brand-primary shrink-0" /><p className="text-sm font-bold text-text-primary truncate">{viewerFile.name}</p></div>
-                                <div className="flex items-center gap-1 shrink-0">
-                                    <a href={viewerFile.url} download className="p-2 rounded-lg text-text-secondary hover:bg-white/[0.06]" title="Download"><Download className="h-4 w-4" /></a>
-                                    <button onClick={() => setViewerFile(null)} className="p-2 rounded-lg text-text-secondary hover:bg-white/[0.06]"><X className="h-4 w-4" /></button>
-                                </div>
-                            </div>
-                            <div className="flex-1 bg-slate-100 dark:bg-black/40 overflow-auto flex items-center justify-center">
-                                {isImage ? <img src={viewerFile.url} alt={viewerFile.name} className="max-w-full max-h-full object-contain" /> : <iframe src={viewerFile.url} title={viewerFile.name} className="w-full h-full border-0" />}
-                            </div>
-                        </div>
-                    </div>
-                );
-            })()}
+            {fileViewer}
 
             {/* ── Alert ──────────────────────────────────────────────────── */}
             {alert && (

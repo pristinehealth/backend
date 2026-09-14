@@ -4,6 +4,7 @@ import ComplianceEvidence from '@/models/ComplianceEvidence';
 import ComplianceEvent from '@/models/ComplianceEvent';
 import Staff from '@/models/Staff';
 import JobApplication from '@/models/JobApplication';
+import EmployeeRecord from '@/models/EmployeeRecord';
 import JobPosition from '@/models/JobPosition';
 import dbConnect from '@/lib/mongoose';
 import { deleteAssetByUrl } from '@/lib/cloudinary';
@@ -39,14 +40,27 @@ export async function linkApplicationDocumentsToStaff(
   try {
     await dbConnect();
 
-    const resolvedStaffId = staffId || staffEmail;
     const emailLc = (staffEmail || '').toLowerCase();
     const now = new Date();
 
-    const appDocs = await ApplicationDocument.find({
-      applicationId,
-      status: 'verified', // Only materialize documents an admin verified.
-    }).lean();
+    // Person-centric (Phase 2): resolve the application's EmployeeRecord so we can
+    // (a) materialize the person's verified documents across ALL their applications
+    // and (b) key compliance on the record's staffId. Both fall back to the
+    // application-scoped read + passed staffId when the record isn't linked yet, so
+    // behavior is identical for the common single-application case.
+    const app = await JobApplication.findById(applicationId).select('employeeRecordId').lean();
+    const employeeRecordId = (app as any)?.employeeRecordId || null;
+    const record = employeeRecordId
+      ? await EmployeeRecord.findById(employeeRecordId).select('staffId').lean()
+      : null;
+    const resolvedStaffId = staffId || (record as any)?.staffId || staffEmail;
+
+    // Only materialize documents an admin verified. Prefer the person (record);
+    // union with the application id so a not-yet-backfilled doc is still covered.
+    const docFilter: any = { status: 'verified' };
+    if (employeeRecordId) docFilter.$or = [{ employeeRecordId }, { applicationId }];
+    else docFilter.applicationId = applicationId;
+    const appDocs = await ApplicationDocument.find(docFilter).lean();
 
     if (!appDocs.length) {
       console.log(`[Compliance Materialize] No verified documents for application ${applicationId}`);

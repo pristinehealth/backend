@@ -18,6 +18,7 @@ import {
   Save,
   Plus,
   Trash2,
+  ClipboardList,
 } from "lucide-react";
 import {
   type ComplianceSummary,
@@ -204,6 +205,35 @@ function StaffComplianceDetail({ row, onClose }: { row: StaffRow; onClose: () =>
   const [rejectTarget, setRejectTarget] = useState<string | null>(null); // requirementKey being rejected
   const [rejectReason, setRejectReason] = useState("");
 
+  // This staff member's onboarding (questionnaires + documents), so their progress
+  // is visible right here — the same view candidates get.
+  const [ob, setOb] = useState<any | null>(null);
+  const [obDocs, setObDocs] = useState<any[]>([]);
+  const [obLoading, setObLoading] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setObLoading(true);
+      try {
+        const res = await fetch(`/api/admin/onboarding/staff?staffId=${encodeURIComponent(row.staffId)}`);
+        const data = await res.json();
+        const r = Array.isArray(data?.data) ? data.data[0] : null;
+        if (cancelled) return;
+        setOb(r || null);
+        if (r?.recordId) {
+          const dres = await fetch(`/api/admin/onboarding/staff/${r.recordId}/documents`);
+          const ddata = await dres.json();
+          if (!cancelled) setObDocs(Array.isArray(ddata?.documents) ? ddata.documents : []);
+        } else if (!cancelled) setObDocs([]);
+      } catch {
+        if (!cancelled) { setOb(null); setObDocs([]); }
+      } finally {
+        if (!cancelled) setObLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [row.staffId]);
+
   // Cards for this staff member — cached per staffId; a write invalidates this
   // exact entry so it refetches, while other staff stay cached.
   const { data: detail, isLoading: loading, error: detailError } = useGetStaffComplianceQuery(row.staffId);
@@ -264,8 +294,11 @@ function StaffComplianceDetail({ row, onClose }: { row: StaffRow; onClose: () =>
       const up = await fetch("/api/upload", { method: "POST", body: fd });
       const upData = await up.json();
       if (!up.ok) throw new Error(upData.error || "Upload failed.");
+      // An admin manually attaching a document they've received counts as verified
+      // in one step (carrying any expiry date they've drafted for this requirement).
       await doAction(key, "add_evidence", {
-        evidence: { fileUrl: upData.url, fileName: file.name, publicId: upData.public_id },
+        evidence: { fileUrl: upData.url, fileName: file.name, publicId: upData.public_id, markVerified: true },
+        ...(expiryDrafts[key] ? { expiryDate: expiryDrafts[key] } : {}),
       });
     } catch (err: any) {
       setError(err?.message || "Upload failed.");
@@ -302,6 +335,70 @@ function StaffComplianceDetail({ row, onClose }: { row: StaffRow; onClose: () =>
         {error && (
           <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-400">{error}</div>
         )}
+
+        {/* Onboarding progress — questionnaires + requested documents for this staff member */}
+        {(() => {
+          const obBadge = (s: string) => s === 'completed'
+            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+            : s === 'in_progress' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+            : s === 'verified' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+            : s === 'rejected' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+            : s === 'pending' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+            : 'border-border-card text-text-muted';
+          const packet = (ob?.onboarding || []) as any[];
+          const reqDocs = (ob?.invite?.requestedDocuments || []) as { key: string; label: string }[];
+          const hasOnboarding = !!ob && (packet.length > 0 || reqDocs.length > 0);
+          return (
+            <div className="rounded-2xl border border-border-card bg-surface-card p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <ClipboardList className="h-4 w-4 text-text-muted" />
+                  <p className="text-sm font-black text-text-primary">Onboarding</p>
+                </div>
+                {ob?.onboardingStatus && <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${obBadge(ob.onboardingStatus)}`}>{String(ob.onboardingStatus).replace('_', ' ')}</span>}
+              </div>
+              {obLoading ? (
+                <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-brand-primary" /></div>
+              ) : !hasOnboarding ? (
+                <p className="text-xs text-text-muted">No onboarding assigned yet. Start it from the Onboarding → Staff tab.</p>
+              ) : (
+                <div className="space-y-2.5">
+                  {packet.length > 0 && ob.progress && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-text-muted">
+                        <span>{ob.progress.done}/{ob.progress.total} questionnaires complete</span>
+                        <span>{ob.progress.answered}/{ob.progress.answerable} questions answered</span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-border-card overflow-hidden">
+                        <div className={`h-full rounded-full ${ob.progress.percent === 100 ? 'bg-emerald-500' : 'bg-brand-primary'}`} style={{ width: `${Math.min(100, Math.max(0, ob.progress.percent))}%` }} />
+                      </div>
+                    </div>
+                  )}
+                  {packet.map((q) => (
+                    <div key={q._id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="text-text-primary font-semibold truncate">{q.formName} <span className="text-[10px] text-text-muted font-normal">· {q.answeredCount}/{q.totalCount} answered</span></span>
+                      <span className={`shrink-0 inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${obBadge(q.status)}`}>{q.status === 'completed' ? 'Completed' : 'In progress'}</span>
+                    </div>
+                  ))}
+                  {reqDocs.map((d) => {
+                    const doc = obDocs.find((x) => x.documentType === d.key);
+                    return (
+                      <div key={d.key} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="text-text-primary font-semibold truncate">{d.label}</span>
+                        <span className="shrink-0 flex items-center gap-2">
+                          {doc?.fileUrl && (
+                            <a href={`/api/admin/file?src=${encodeURIComponent(doc.fileUrl)}`} target="_blank" rel="noreferrer" className="text-xs font-semibold text-brand-primary inline-flex items-center gap-1"><Eye className="h-3 w-3" /> View</a>
+                          )}
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${obBadge(doc?.status || 'missing')}`}>{doc?.status || 'missing'}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Attach a requirement to this staff member (beyond role/position targeting) */}
         <div className="rounded-2xl border border-border-card bg-surface-card p-4 space-y-3">
