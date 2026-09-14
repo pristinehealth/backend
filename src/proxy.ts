@@ -31,6 +31,8 @@ export default withAuth(
                     pathname.startsWith("/request-home-care") ||// Public marketing: home care intake form
                     pathname === "/robots.txt" ||               // Crawlers (no auth possible)
                     pathname === "/sitemap.xml" ||              // Crawlers (no auth possible)
+                    pathname === "/BingSiteAuth.xml" ||         // Bing Webmaster site verification
+
                     pathname.startsWith("/jobs") ||             // Public job listings
                     pathname.startsWith("/login") ||
                     pathname.startsWith("/register") ||
