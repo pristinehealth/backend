@@ -1,5 +1,5 @@
-// Image hero for the hub pages: banner background + readable gradient overlay,
-// with heading/description and an optional CTA slot on top.
+// Image hero for the hub pages: banner as a background with a readable gradient
+// overlay, heading/description and an optional CTA slot on top.
 export function MarketingHero({
     image,
     eyebrow,
