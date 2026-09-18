@@ -6,7 +6,7 @@ import {
     Moon, Sun, Users, Phone, Mail, Stethoscope, Clock, HeartPulse, Sparkles,
     Smartphone, FileCheck, Fingerprint, ClipboardCheck, BadgeCheck, CalendarClock,
     FileSignature, Handshake, Utensils, Car, UserRound, Activity, Eye, ScanLine,
-    Bed, Brain, Accessibility, Send, Loader2,
+    Bed, Brain, Accessibility, Send, Loader2, Menu, X,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 
@@ -47,6 +47,7 @@ function Eyebrow({ children, accent = "primary" }: { children: React.ReactNode; 
 export default function LandingPage() {
     const [theme, setTheme] = useState<"light" | "dark">("dark");
     const [scrollY, setScrollY] = useState(0);
+    const [mobileOpen, setMobileOpen] = useState(false);
     const [contact, setContact] = useState({ name: "", email: "", phone: "", inquiryType: "Facility Staffing", message: "", company: "" });
     const [contactStatus, setContactStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
     const [contactError, setContactError] = useState("");
@@ -199,12 +200,42 @@ export default function LandingPage() {
                         <button onClick={toggleTheme} className="p-2 rounded-xl text-slate-500 hover:bg-slate-200/50 dark:hover:bg-white/[0.05] transition-all" title="Toggle theme">
                             {theme === "dark" ? <Sun className="h-5 w-5 text-amber-500" /> : <Moon className="h-5 w-5 text-indigo-500" />}
                         </button>
-                        <Link href={STAFFING} className="bg-brand-accent hover:bg-brand-accent-dark text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-brand-accent/20 flex items-center gap-1.5 active:scale-95">
+                        <Link href={STAFFING} className="hidden md:flex bg-brand-accent hover:bg-brand-accent-dark text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-brand-accent/20 items-center gap-1.5 active:scale-95">
                             <LogIn className="h-4 w-4" /> Portal Login
                         </Link>
+                        <button type="button" aria-label="Open menu" aria-expanded={mobileOpen} onClick={() => setMobileOpen(true)} className="md:hidden p-2 -mr-1 rounded-xl text-text-primary hover:bg-black/5 dark:hover:bg-white/[0.05] transition-all">
+                            <Menu className="h-6 w-6" />
+                        </button>
                     </div>
                 </div>
             </header>
+
+            {/* Mobile drawer */}
+            {mobileOpen && (
+                <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true">
+                    <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+                    <div className="absolute right-0 top-0 h-full w-80 max-w-[82%] bg-sidebar-bg border-l border-sidebar-border shadow-2xl flex flex-col p-6">
+                        <div className="flex items-center justify-between mb-6">
+                            <span className="font-black text-text-primary">Menu</span>
+                            <button type="button" aria-label="Close menu" onClick={() => setMobileOpen(false)} className="p-2 -mr-1 rounded-xl text-text-primary hover:bg-black/5 dark:hover:bg-white/[0.05] transition-all">
+                                <X className="h-6 w-6" />
+                            </button>
+                        </div>
+                        <nav className="flex flex-col">
+                            <Link href="/facility-staffing" onClick={() => setMobileOpen(false)} className="py-3 text-base font-bold text-text-secondary hover:text-brand-primary border-b border-sidebar-border transition-colors">Facility Staffing</Link>
+                            <Link href="/home-care" onClick={() => setMobileOpen(false)} className="py-3 text-base font-bold text-text-secondary hover:text-brand-primary border-b border-sidebar-border transition-colors">Home Care</Link>
+                            <Link href="/locations" onClick={() => setMobileOpen(false)} className="py-3 text-base font-bold text-text-secondary hover:text-brand-primary border-b border-sidebar-border transition-colors">Service Areas</Link>
+                            <Link href="/jobs" onClick={() => setMobileOpen(false)} className="py-3 text-base font-bold text-text-secondary hover:text-brand-primary border-b border-sidebar-border transition-colors">Careers</Link>
+                            <a href="#contact" onClick={() => setMobileOpen(false)} className="py-3 text-base font-bold text-text-secondary hover:text-brand-primary border-b border-sidebar-border transition-colors">Contact</a>
+                        </nav>
+                        <div className="mt-6 flex flex-col gap-3">
+                            <Link href="/request-staffing" onClick={() => setMobileOpen(false)} className="inline-flex items-center justify-center px-5 py-3 rounded-xl text-sm font-bold bg-brand-primary text-white hover:bg-brand-primary-dark transition-colors">Request Staffing</Link>
+                            <Link href="/request-home-care" onClick={() => setMobileOpen(false)} className="inline-flex items-center justify-center px-5 py-3 rounded-xl text-sm font-bold border border-brand-primary/40 text-brand-primary hover:bg-brand-primary-muted transition-colors">Request Home Care</Link>
+                            <Link href={STAFFING} onClick={() => setMobileOpen(false)} className="inline-flex items-center justify-center gap-1.5 px-5 py-3 rounded-xl text-sm font-bold bg-brand-accent text-white hover:bg-brand-accent-dark transition-colors"><LogIn className="h-4 w-4" /> Portal Login</Link>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* 1 ── HERO ──────────────────────────────────────────────────────── */}
             <section className="relative min-h-[640px] flex items-center overflow-hidden bg-zinc-950">

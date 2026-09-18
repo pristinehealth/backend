@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CONTACT_EMAIL, SITE_SHORT } from "@/lib/seo";
+import { MobileNav } from "./MobileNav";
 
 const NAV = [
     { href: "/facility-staffing", label: "Facility Staffing" },
@@ -36,8 +37,8 @@ function MarketingHeader() {
                         <Link key={n.href} href={n.href} className="hover:text-brand-primary transition-colors">{n.label}</Link>
                     ))}
                 </nav>
-                <div className="hidden sm:block"><CtaButtons /></div>
-                <a href={STAFFING_CTA} className="sm:hidden px-4 py-2 rounded-xl text-xs font-bold bg-brand-primary text-white">Contact</a>
+                <div className="hidden md:block"><CtaButtons /></div>
+                <MobileNav />
             </div>
         </header>
     );
