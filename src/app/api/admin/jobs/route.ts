@@ -4,6 +4,7 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import dbConnect from '@/lib/mongoose';
 import JobPosition from '@/models/JobPosition';
 import JobApplication from '@/models/JobApplication';
+import { getNextSequence } from '@/models/Counter';
 import { markImageConsumed } from '@/lib/positionImage';
 import { LOCATION_SET } from '@/lib/usStates';
 
@@ -79,10 +80,12 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'At least one job description section is required' }, { status: 400 });
         }
 
+        const refNumber = await getNextSequence('jobRef');
         const job = await JobPosition.create({
             title,
             location: (typeof location === 'string' && LOCATION_SET.has(location)) ? location : null,
             city: (typeof city === 'string' && city.trim()) ? city.trim() : null,
+            refNumber,
             sections,
             imageUrl: imageUrl || null,
             imagePublicId: imagePublicId || null,

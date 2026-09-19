@@ -26,6 +26,7 @@ const getJob = cache(async (id: string): Promise<JobData | null> => {
         title: job.title,
         location: job.location ?? null,
         city: job.city ?? null,
+        refNumber: job.refNumber ?? null,
         sections: (job.sections || []).map((s: any) => ({ label: s.label, content: s.content })),
         imageUrl: job.imageUrl ?? null,
         createdAt: (job.createdAt ? new Date(job.createdAt) : new Date()).toISOString(),

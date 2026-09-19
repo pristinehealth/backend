@@ -5,12 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Briefcase, Moon, Sun, Clock, ShieldCheck, MapPin, CheckCircle2, Sparkles } from "lucide-react";
 import { formatLocation } from "@/lib/usStates";
+import { formatJobRef } from "@/lib/jobRef";
 
 export interface JobView {
     _id: string;
     title: string;
     location?: string | null;
     city?: string | null;
+    refNumber?: number | null;
     sections: { label: string; content: string }[];
     imageUrl?: string | null;
     createdAt: string;
@@ -74,6 +76,7 @@ export function JobDetailClient({ job }: { job: JobView }) {
                             <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-brand-primary" /> Credentialed role</span>
                             <span className="flex items-center gap-2"><Clock className="h-4 w-4 text-brand-primary" /> Posted {new Date(job.createdAt).toLocaleDateString()}</span>
                             <span className="flex items-center gap-2"><MapPin className="h-4 w-4 text-brand-primary" /> {formatLocation(job.city, job.location) || "Multi-State"}</span>
+                            <span className="flex items-center gap-2 font-mono text-xs" title="Job reference ID">Job ID: {formatJobRef(job.refNumber) ?? job._id}</span>
                         </div>
                     </div>
                 </div>

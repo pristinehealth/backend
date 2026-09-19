@@ -8,6 +8,7 @@ import {
     Lock, Moon, Sun, ChevronLeft, ArrowRight, MapPin, Clock, ShieldCheck, Sparkles
 } from "lucide-react";
 import { formatLocation } from "@/lib/usStates";
+import { formatJobRef } from "@/lib/jobRef";
 
 interface CustomField {
     name: string;
@@ -27,6 +28,7 @@ interface JobPosition {
     title: string;
     location?: string | null;
     city?: string | null;
+    refNumber?: number | null;
     sections: JobSection[];
     status: 'open' | 'closed';
     customFields: CustomField[];
@@ -194,6 +196,9 @@ export default function CareersPage() {
                                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-brand-primary"><MapPin className="h-3 w-3" /> {formatLocation(job.city, job.location)}</span>
                                             )}
                                             <span className="inline-block text-[10px] text-text-muted font-mono">Posted {new Date(job.createdAt).toLocaleDateString()}</span>
+                                            {formatJobRef(job.refNumber) && (
+                                                <span className="inline-block text-[10px] text-text-muted font-mono">{formatJobRef(job.refNumber)}</span>
+                                            )}
                                         </div>
                                     </div>
                                     <span className="hidden sm:inline-flex items-center gap-1 text-xs font-bold text-brand-primary opacity-0 group-hover:opacity-100 -translate-x-1 group-hover:translate-x-0 transition-all shrink-0">

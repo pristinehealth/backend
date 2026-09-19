@@ -22,6 +22,9 @@ export interface JobPositionDocument extends mongoose.Document {
     // public listing, job detail, and application page.
     location?: string | null;
     city?: string | null;
+    // Human-friendly sequential reference (e.g. 7 → "PHS-0007"), assigned on
+    // create via the "jobRef" counter. Optional: pre-backfill jobs have none.
+    refNumber?: number;
     sections: JobSection[];
     status: 'draft' | 'open' | 'closed';
     formId?: mongoose.Types.ObjectId;
@@ -50,6 +53,12 @@ const JobPositionSchema = new mongoose.Schema<JobPositionDocument>(
             type: String,
             default: null,
             trim: true,
+        },
+        refNumber: {
+            type: Number,
+            index: true,
+            unique: true,
+            sparse: true, // allow many jobs with no number (pre-backfill)
         },
         sections: [
             {
