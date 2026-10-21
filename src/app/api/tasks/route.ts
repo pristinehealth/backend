@@ -54,9 +54,17 @@ export async function GET(request: Request) {
                 });
             }
 
-            // Step 2: Get all task IDs associated with those staff via timesheets
-            const timesheets = await Timesheet.find({ staff_id: { $in: staffIds } }).lean() as any[];
-            const matchedTaskIds = Array.from(new Set(timesheets.map((ts: any) => String(ts.task_id))));
+            // Step 2: Tasks for those staff — assigned to them (task.assignees)
+            // OR with a timesheet they logged. Assignment counts even before any
+            // time is tracked, so un-started tasks still match a staff search.
+            const [timesheets, assigneeTasks] = await Promise.all([
+                Timesheet.find({ staff_id: { $in: staffIds } }).lean() as Promise<any[]>,
+                Task.find({ 'assignees.assigneeid': { $in: staffIds } }).select('id').lean() as Promise<any[]>,
+            ]);
+            const matchedTaskIds = Array.from(new Set([
+                ...timesheets.map((ts: any) => String(ts.task_id)),
+                ...assigneeTasks.map((t: any) => String(t.id)),
+            ]));
 
             if (matchedTaskIds.length === 0) {
                 return NextResponse.json({
@@ -126,9 +134,15 @@ export async function GET(request: Request) {
             }));
             enrichedTimesheets.sort((a, b) => Number(b.start_time) - Number(a.start_time));
 
-            const assignedStaff: string[] = Array.from(
-                new Set(enrichedTimesheets.map((ts: any) => ts.staff_name).filter(Boolean))
-            );
+            // Assigned staff = the task's actual Perfex assignees, independent of
+            // whether any time has been logged. (Previously derived from
+            // timesheets, so a task only showed an assignee once someone logged
+            // time against it — i.e. effectively only when completed.)
+            const assignedStaff: string[] = Array.from(new Set(
+                (task.assignees || [])
+                    .map((a: any) => (a.full_name || `${a.firstname || ''} ${a.lastname || ''}`).trim())
+                    .filter(Boolean)
+            ));
 
             let client_name: string | null = null;
             const projectId = task.project_data?.id || task.rel_id;
