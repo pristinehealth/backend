@@ -188,6 +188,7 @@ export function TasksTab() {
                                         <Users className="h-3.5 w-3.5" /> Assigned Staff
                                     </span>
                                 </th>
+                                <th className="p-4">Followers</th>
                                 <th className="p-4">Priority</th>
                                 <th className="p-4">Deadline</th>
                                 <th className="p-4">Status</th>
@@ -201,7 +202,7 @@ export function TasksTab() {
                             )}
                             {!taskList?.length ? (
                                 <tr>
-                                    <td colSpan={6} className="text-center py-12 text-slate-500">
+                                    <td colSpan={7} className="text-center py-12 text-slate-500">
                                         {staffSearch ? `No tasks found for caregiver "${staffSearch}".` : "No tasks found."}
                                     </td>
                                 </tr>
@@ -234,6 +235,19 @@ export function TasksTab() {
                                                 </div>
                                             ) : (
                                                 <span className="text-xs text-text-muted italic">Unassigned</span>
+                                            )}
+                                        </td>
+                                        <td className="p-4">
+                                            {task.followers?.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1">
+                                                    {task.followers.map((name: string) => (
+                                                        <span key={name} className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/10 border border-violet-500/20 text-violet-400">
+                                                            <User className="h-2.5 w-2.5" />{name}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-text-muted">—</span>
                                             )}
                                         </td>
                                         <td className="p-4">
@@ -361,6 +375,15 @@ export function TasksTab() {
                                     <div className="flex items-center gap-2 ui-card-soft rounded-xl px-4 py-2 text-xs">
                                         <Users className="h-4 w-4 text-text-muted shrink-0" />
                                         <span className="font-semibold text-text-primary">{selectedTask.assignedStaff.join(', ')}</span>
+                                    </div>
+                                )}
+
+                                {/* Followers pill */}
+                                {selectedTask.followers?.length > 0 && (
+                                    <div className="flex items-center gap-2 ui-card-soft rounded-xl px-4 py-2 text-xs">
+                                        <User className="h-4 w-4 text-text-muted shrink-0" />
+                                        <span className="text-text-muted">Followers:</span>
+                                        <span className="font-semibold text-text-primary">{selectedTask.followers.join(', ')}</span>
                                     </div>
                                 )}
 

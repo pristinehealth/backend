@@ -144,6 +144,14 @@ export async function GET(request: Request) {
                     .filter(Boolean)
             ));
 
+            // Followers = Perfex task followers (people notified, distinct from
+            // assignees). Same shape; synced via strict:false on the Task model.
+            const followers: string[] = Array.from(new Set(
+                (task.followers || [])
+                    .map((f: any) => (f.full_name || `${f.firstname || ''} ${f.lastname || ''}`).trim())
+                    .filter(Boolean)
+            ));
+
             let client_name: string | null = null;
             const projectId = task.project_data?.id || task.rel_id;
             if (projectId) {
@@ -163,7 +171,7 @@ export async function GET(request: Request) {
                 ? new Date(Number(shiftTimes[0].end_time) * 1000).toISOString()
                 : null;
 
-            return { ...task, timesheets: enrichedTimesheets, assignedStaff, client_name, firstShiftStart, lastShiftEnd };
+            return { ...task, timesheets: enrichedTimesheets, assignedStaff, followers, client_name, firstShiftStart, lastShiftEnd };
         }));
 
         return NextResponse.json({
